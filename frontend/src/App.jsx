@@ -14,7 +14,7 @@ import { generateDocumentResponse } from './lib/agentClient';
 import { getDefaultModelForProvider, getModelsForProvider } from './lib/modelCatalog';
 import { configManager } from './lib/config';
 import { fetchOpenRouterModels, sortModelsByPopularity } from './lib/openRouterClient';
-import { selectOutputFolder, writeGeneratedFile } from './lib/nativeAppClient';
+import { loadSession, readGeneratedFile, saveSession, selectOutputFolder, writeGeneratedFile } from './lib/nativeAppClient';
 import { Quit, WindowIsMaximised, WindowMinimise, WindowToggleMaximise } from '../wailsjs/runtime/runtime';
 
 const themes = [
@@ -46,6 +46,36 @@ function readFileAsText(file) {
     });
 }
 
+function findActiveFile(nextFiles, nextActivePath) {
+    return (
+        nextFiles.find((file) => file.path === nextActivePath && file.kind !== 'folder') ||
+        nextFiles.find((file) => file.kind !== 'folder') ||
+        initialFiles[1]
+    );
+}
+
+function buildSessionPayload({
+    messages,
+    files,
+    activePath,
+    outputFolder,
+    selectionHint,
+    sessionStarted,
+    isFileExplorerOpen,
+    isAgentPaneOpen,
+}) {
+    return {
+        messages,
+        files,
+        activePath,
+        outputFolder,
+        selectionHint,
+        sessionStarted,
+        isFileExplorerOpen,
+        isAgentPaneOpen,
+    };
+}
+
 function AppShell() {
     const { theme, setTheme } = useTheme();
     const [mounted, setMounted] = useState(false);
@@ -55,6 +85,7 @@ function AppShell() {
     const [activeFile, setActiveFile] = useState(initialFiles[1]);
     const [selectionHint, setSelectionHint] = useState('');
     const [sessionStarted, setSessionStarted] = useState(false);
+    const [sessionLoaded, setSessionLoaded] = useState(false);
     const [provider, setProvider] = useState('openai');
     const [apiKey, setApiKey] = useState('');
     const [model, setModel] = useState(getDefaultModelForProvider('openai'));
@@ -66,6 +97,8 @@ function AppShell() {
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [isFileExplorerOpen, setIsFileExplorerOpen] = useState(true);
     const [isAgentPaneOpen, setIsAgentPaneOpen] = useState(true);
+    const [activeToolCalls, setActiveToolCalls] = useState([]);
+    const [completedToolCalls, setCompletedToolCalls] = useState([]);
     const openInputId = 'open-doc-input';
     const importInputId = 'import-doc-input';
     const modelOptions = useMemo(() => {
@@ -278,6 +311,8 @@ function AppShell() {
         setSessionStarted(true); // Start session immediately to show messages
         setAgentError('');
         setIsGenerating(true);
+        setActiveToolCalls([]);
+        setCompletedToolCalls([]);
 
         try {
             const selectedFolder = await ensureOutputFolder();
@@ -287,8 +322,17 @@ function AppShell() {
                 model,
                 messages: nextMessages,
                 activeDocument: activeFile,
+                outputFolder: selectedFolder,
+                readFile: ({ relativePath }) => readGeneratedFile(selectedFolder, relativePath),
                 writeFile: ({ relativePath, content }) =>
                     writeGeneratedFile(selectedFolder, relativePath, content),
+                onToolCall: (toolCall) => {
+                    setActiveToolCalls((prev) => [...prev, toolCall]);
+                },
+                onToolResult: (toolResult) => {
+                    setActiveToolCalls((prev) => prev.filter(tc => tc.toolCallId !== toolResult.toolCallId));
+                    setCompletedToolCalls((prev) => [...prev, toolResult]);
+                },
             });
 
             const assistantMessage = {
@@ -313,6 +357,11 @@ function AppShell() {
             setAgentError(errorMessage); // Keep for potential other uses
         } finally {
             setIsGenerating(false);
+            // Clear tool calls after a delay to show completion
+            setTimeout(() => {
+                setActiveToolCalls([]);
+                setCompletedToolCalls([]);
+            }, 2000);
         }
     };
 
@@ -329,6 +378,8 @@ function AppShell() {
         
         setIsGenerating(true);
         setAgentError('');
+        setActiveToolCalls([]);
+        setCompletedToolCalls([]);
 
         try {
             const selectedFolder = outputFolder || await selectOutputFolder();
@@ -346,8 +397,17 @@ function AppShell() {
                 model,
                 messages: messagesWithoutLast,
                 activeDocument: activeFile,
+                outputFolder: selectedFolder,
+                readFile: ({ relativePath }) => readGeneratedFile(selectedFolder, relativePath),
                 writeFile: ({ relativePath, content }) =>
                     writeGeneratedFile(selectedFolder, relativePath, content),
+                onToolCall: (toolCall) => {
+                    setActiveToolCalls((prev) => [...prev, toolCall]);
+                },
+                onToolResult: (toolResult) => {
+                    setActiveToolCalls((prev) => prev.filter(tc => tc.toolCallId !== toolResult.toolCallId));
+                    setCompletedToolCalls((prev) => [...prev, toolResult]);
+                },
             });
 
             const assistantMessage = {
@@ -392,6 +452,11 @@ function AppShell() {
             setAgentError(errorMessage);
         } finally {
             setIsGenerating(false);
+            // Clear tool calls after a delay to show completion
+            setTimeout(() => {
+                setActiveToolCalls([]);
+                setCompletedToolCalls([]);
+            }, 2000);
         }
     };
 
@@ -410,6 +475,33 @@ function AppShell() {
     useEffect(() => {
         const initialize = async () => {
             await loadConfig();
+
+            try {
+                const session = await loadSession();
+                if (session && typeof session === 'object') {
+                    const nextFiles = Array.isArray(session.files) && session.files.length > 0 ? session.files : initialFiles;
+                    const nextActivePath = typeof session.activePath === 'string' && session.activePath.trim() ? session.activePath : 'API_DOCS.md';
+                    const nextActiveFile = findActiveFile(nextFiles, nextActivePath);
+
+                    setFiles(nextFiles);
+                    setActivePath(nextActiveFile.path);
+                    setActiveFile(nextActiveFile);
+                    setMessages(Array.isArray(session.messages) ? session.messages : []);
+                    setOutputFolder(typeof session.outputFolder === 'string' ? session.outputFolder : '');
+                    setSelectionHint(typeof session.selectionHint === 'string' ? session.selectionHint : '');
+                    setSessionStarted(Boolean(session.sessionStarted || (Array.isArray(session.messages) && session.messages.length > 0)));
+                    if (typeof session.isFileExplorerOpen === 'boolean') {
+                        setIsFileExplorerOpen(session.isFileExplorerOpen);
+                    }
+                    if (typeof session.isAgentPaneOpen === 'boolean') {
+                        setIsAgentPaneOpen(session.isAgentPaneOpen);
+                    }
+                }
+            } catch (error) {
+                console.error('Session load error:', error);
+            }
+
+            setSessionLoaded(true);
             setMounted(true);
         };
 
@@ -437,6 +529,41 @@ function AppShell() {
             loadOpenRouterModelsIfNeeded();
         }
     }, [isSettingsOpen, provider, apiKey]);
+
+    useEffect(() => {
+        if (!sessionLoaded) {
+            return;
+        }
+
+        const timeoutId = window.setTimeout(() => {
+            void saveSession(
+                buildSessionPayload({
+                    messages,
+                    files,
+                    activePath,
+                    outputFolder,
+                    selectionHint,
+                    sessionStarted,
+                    isFileExplorerOpen,
+                    isAgentPaneOpen,
+                })
+            ).catch((error) => {
+                console.error('Session save error:', error);
+            });
+        }, 250);
+
+        return () => window.clearTimeout(timeoutId);
+    }, [
+        activePath,
+        files,
+        isAgentPaneOpen,
+        isFileExplorerOpen,
+        messages,
+        outputFolder,
+        selectionHint,
+        sessionLoaded,
+        sessionStarted,
+    ]);
 
     const explorerTree = useMemo(() => makeExplorerTree(files, activePath), [files, activePath]);
 
@@ -528,6 +655,8 @@ function AppShell() {
                                             onSendPrompt={runAgentPrompt}
                                             onOpenSettings={() => setIsSettingsOpen(true)}
                                             onRegenerateLastMessage={regenerateLastMessage}
+                                            activeToolCalls={activeToolCalls}
+                                            completedToolCalls={completedToolCalls}
                                         />
                                     </Panel>
                                 </>

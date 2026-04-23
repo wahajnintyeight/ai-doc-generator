@@ -6,12 +6,28 @@ export function Greet(arg1) {
   return window['go']['main']['App']['Greet'](arg1);
 }
 
+export function ListGeneratedFiles(arg1, arg2) {
+  return window['go']['main']['App']['ListGeneratedFiles'](arg1, arg2);
+}
+
 export function LoadConfig() {
   return window['go']['main']['App']['LoadConfig']();
 }
 
+export function LoadSession() {
+  return window['go']['main']['App']['LoadSession']();
+}
+
+export function ReadGeneratedFile(arg1, arg2) {
+  return window['go']['main']['App']['ReadGeneratedFile'](arg1, arg2);
+}
+
 export function SaveConfig(arg1) {
   return window['go']['main']['App']['SaveConfig'](arg1);
+}
+
+export function SaveSession(arg1) {
+  return window['go']['main']['App']['SaveSession'](arg1);
 }
 
 export function SelectOutputFolder() {

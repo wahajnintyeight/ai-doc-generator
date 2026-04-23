@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,6 +26,12 @@ type Config struct {
 	LastUsed string `json:"lastUsed"`
 }
 
+type generatedFileEntry struct {
+	Name  string `json:"name"`
+	Path  string `json:"path"`
+	IsDir bool   `json:"isDir"`
+}
+
 // NewApp creates a new App application struct
 func NewApp() *App {
 	// Initialize config path in USERDATA/doc-gen-ai/config.json
@@ -36,6 +43,32 @@ func NewApp() *App {
 	return &App{
 		configPath: filepath.Join(configDir, "config.json"),
 	}
+}
+
+func (a *App) sessionPath() string {
+	return filepath.Join(filepath.Dir(a.configPath), "session.json")
+}
+
+func resolveSandboxPath(baseDir string, relativePath string) (string, error) {
+	cleanBase := filepath.Clean(strings.TrimSpace(baseDir))
+	if cleanBase == "" {
+		return "", fmt.Errorf("base folder is required")
+	}
+
+	cleanRelative := filepath.Clean(strings.TrimSpace(relativePath))
+	if cleanRelative == "" || cleanRelative == "." {
+		return "", fmt.Errorf("relative path is required")
+	}
+	if filepath.IsAbs(cleanRelative) || strings.HasPrefix(cleanRelative, "..") {
+		return "", fmt.Errorf("relative path must stay within the selected folder")
+	}
+
+	fullPath := filepath.Clean(filepath.Join(cleanBase, cleanRelative))
+	if fullPath != cleanBase && !strings.HasPrefix(fullPath, cleanBase+string(os.PathSeparator)) {
+		return "", fmt.Errorf("target path is outside the selected folder")
+	}
+
+	return fullPath, nil
 }
 
 // startup is called when the app starts. The context is saved
@@ -76,22 +109,9 @@ func (a *App) SelectOutputFolder() (string, error) {
 
 // WriteGeneratedFile writes markdown content into a file under the selected output folder.
 func (a *App) WriteGeneratedFile(outputFolder string, relativePath string, content string) (string, error) {
-	baseDir := filepath.Clean(strings.TrimSpace(outputFolder))
-	if baseDir == "" {
-		return "", fmt.Errorf("output folder is required")
-	}
-
-	cleanRelative := filepath.Clean(strings.TrimSpace(relativePath))
-	if cleanRelative == "" || cleanRelative == "." {
-		return "", fmt.Errorf("relative path is required")
-	}
-	if filepath.IsAbs(cleanRelative) || strings.HasPrefix(cleanRelative, "..") {
-		return "", fmt.Errorf("relative path must stay within the selected folder")
-	}
-
-	fullPath := filepath.Clean(filepath.Join(baseDir, cleanRelative))
-	if fullPath != baseDir && !strings.HasPrefix(fullPath, baseDir+string(os.PathSeparator)) {
-		return "", fmt.Errorf("target file is outside the selected folder")
+	fullPath, err := resolveSandboxPath(outputFolder, relativePath)
+	if err != nil {
+		return "", err
 	}
 
 	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
@@ -103,6 +123,84 @@ func (a *App) WriteGeneratedFile(outputFolder string, relativePath string, conte
 	}
 
 	return fullPath, nil
+}
+
+// ReadGeneratedFile reads a file from the selected output folder.
+func (a *App) ReadGeneratedFile(outputFolder string, relativePath string) (string, error) {
+	fullPath, err := resolveSandboxPath(outputFolder, relativePath)
+	if err != nil {
+		return "", err
+	}
+
+	data, err := os.ReadFile(fullPath)
+	if err != nil {
+		return "", err
+	}
+
+	return string(data), nil
+}
+
+// ListGeneratedFiles lists files in a directory under the selected output folder.
+func (a *App) ListGeneratedFiles(outputFolder string, relativePath string) (string, error) {
+	fullPath, err := resolveSandboxPath(outputFolder, relativePath)
+	if err != nil {
+		return "", err
+	}
+
+	entries, err := os.ReadDir(fullPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			payload, marshalErr := json.Marshal([]generatedFileEntry{})
+			if marshalErr != nil {
+				return "", marshalErr
+			}
+			return string(payload), nil
+		}
+		return "", err
+	}
+
+	result := make([]generatedFileEntry, 0, len(entries))
+	for _, entry := range entries {
+		name := entry.Name()
+		displayPath := filepath.ToSlash(filepath.Join(strings.TrimSpace(relativePath), name))
+		if strings.TrimSpace(relativePath) == "" {
+			displayPath = filepath.ToSlash(name)
+		}
+		result = append(result, generatedFileEntry{
+			Name:  name,
+			Path:  displayPath,
+			IsDir: entry.IsDir(),
+		})
+	}
+
+	payload, err := json.Marshal(result)
+	if err != nil {
+		return "", err
+	}
+
+	return string(payload), nil
+}
+
+// SaveSession stores the current session JSON alongside the config file.
+func (a *App) SaveSession(sessionJSON string) error {
+	if strings.TrimSpace(sessionJSON) == "" {
+		sessionJSON = "{}"
+	}
+
+	if err := os.MkdirAll(filepath.Dir(a.sessionPath()), 0755); err != nil {
+		return err
+	}
+
+	return os.WriteFile(a.sessionPath(), []byte(sessionJSON), 0644)
+}
+
+// LoadSession reads the saved session JSON.
+func (a *App) LoadSession() string {
+	data, err := os.ReadFile(a.sessionPath())
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
 
 // Greet returns a greeting for the given name

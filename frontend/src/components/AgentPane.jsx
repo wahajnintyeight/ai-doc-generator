@@ -4,6 +4,16 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { PromptComposer } from './PromptComposer';
 import { MessageActions } from './MessageActions';
 import { TypingIndicator } from './TypingIndicator';
+import { ToolCallIndicator } from './ToolCallIndicator';
+
+// Inline markdown renderer for chat messages
+function renderInlineMarkdown(text) {
+  return String(text)
+    .replace(/`([^`]+)`/g, '<code class="rounded bg-black/30 px-1.5 py-0.5 text-[0.9em] font-mono">$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong class="font-semibold">$1</strong>')
+    .replace(/\*([^*]+)\*/g, '<em class="italic">$1</em>')
+    .replace(/\n/g, '<br />');
+}
 
 function MessageBubble({ message, onRegenerate, canRegenerate }) {
   const user = message.role === 'user';
@@ -23,7 +33,10 @@ function MessageBubble({ message, onRegenerate, canRegenerate }) {
             <AlertCircle className="h-3 w-3" />
             Error
           </p>
-          <p className="whitespace-pre-wrap text-red-200">{message.content}</p>
+          <div 
+            className="text-red-200"
+            dangerouslySetInnerHTML={{ __html: renderInlineMarkdown(message.content) }}
+          />
         </div>
       </motion.div>
     );
@@ -45,7 +58,10 @@ function MessageBubble({ message, onRegenerate, canRegenerate }) {
           <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400">
             {user ? 'You' : 'Agent'}
           </p>
-          <p className="whitespace-pre-wrap">{message.content}</p>
+          <div 
+            className={user ? 'text-cyan-100' : 'text-slate-200'}
+            dangerouslySetInnerHTML={{ __html: renderInlineMarkdown(message.content) }}
+          />
 
           <div className={`mt-3 flex ${user ? 'justify-end' : 'justify-start'} opacity-100 transition-opacity duration-200`}>
             <MessageActions
@@ -73,6 +89,8 @@ export function AgentPane({
   onSendPrompt,
   onOpenSettings,
   onRegenerateLastMessage,
+  activeToolCalls = [],
+  completedToolCalls = [],
 }) {
   const messagesEndRef = useRef(null);
   const scrollContainerRef = useRef(null);
@@ -140,7 +158,17 @@ export function AgentPane({
             
             {/* Typing Indicator */}
             <AnimatePresence>
-              {isGenerating && <TypingIndicator />}
+              {isGenerating && !activeToolCalls.length && <TypingIndicator />}
+            </AnimatePresence>
+
+            {/* Tool Call Indicator */}
+            <AnimatePresence>
+              {(activeToolCalls.length > 0 || completedToolCalls.length > 0) && (
+                <ToolCallIndicator 
+                  toolCalls={activeToolCalls}
+                  completedToolCalls={completedToolCalls}
+                />
+              )}
             </AnimatePresence>
             
             {/* Scroll anchor */}
