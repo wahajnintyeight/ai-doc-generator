@@ -9,7 +9,8 @@ import {
   Monitor, 
   Moon, 
   Sun,
-  Laptop
+  Laptop,
+  XCircle
 } from 'lucide-react';
 
 export function Toolbar({
@@ -19,10 +20,12 @@ export function Toolbar({
   onToggleMaximise,
   onQuit,
   onOpenSettings,
+  onCloseWorkspace,
   isMaximised,
   theme,
   setTheme,
   selectionHint,
+  sessionStarted,
 }) {
   const themes = [
     { name: 'Dark', value: 'dark', icon: Moon },
@@ -32,7 +35,7 @@ export function Toolbar({
 
   return (
     <header 
-      className="flex h-14 items-stretch border-b border-white/5 bg-[#07090d]/80 backdrop-blur-md px-4" 
+      className="flex h-14 items-stretch border-b border-white/5 bg-[#07090d]/80 px-4 backdrop-blur-md" 
       style={{ '--wails-draggable': 'drag' }}
     >
       {/* Brand & Status */}
@@ -75,6 +78,19 @@ export function Toolbar({
             <FilePlus2 className="h-4 w-4 text-cyan-500 transition-transform group-hover:scale-110" />
             <span>Import</span>
           </button>
+          {sessionStarted && (
+            <>
+              <div className="h-4 w-px bg-white/5" />
+              <button
+                onClick={onCloseWorkspace}
+                className="group flex h-8 items-center gap-2 rounded-xl px-3 text-[11px] font-bold uppercase tracking-wider text-slate-400 transition-all hover:bg-white/5 hover:text-orange-300"
+                title="Close Workspace"
+              >
+                <XCircle className="h-4 w-4 text-orange-400 transition-transform group-hover:scale-110" />
+                <span>Close</span>
+              </button>
+            </>
+          )}
         </div>
 
         {/* Theme & Settings */}
@@ -109,22 +125,28 @@ export function Toolbar({
         </div>
 
         {/* Window Controls */}
-        <div className="ml-4 flex items-center gap-1 border-l border-white/5 pl-4">
+        <div className="ml-4 flex items-center gap-2 border-l border-white/5 pl-4">
           <button
             onClick={onMinimise}
-            className="flex h-8 w-8 items-center justify-center rounded-xl text-slate-500 transition-all hover:bg-white/5 hover:text-white hover:shadow-lg"
+            className="flex h-9 w-11 items-center justify-center rounded-md border border-white/10 bg-white/[0.03] text-slate-400 transition-all hover:bg-white/10 hover:text-white"
+            aria-label="Minimise window"
+            title="Minimise"
           >
             <Minus className="h-4 w-4" />
           </button>
           <button
             onClick={onToggleMaximise}
-            className="flex h-8 w-8 items-center justify-center rounded-xl text-slate-500 transition-all hover:bg-white/5 hover:text-white hover:shadow-lg"
+            className="flex h-9 w-11 items-center justify-center rounded-md border border-white/10 bg-white/[0.03] text-slate-400 transition-all hover:bg-white/10 hover:text-white"
+            aria-label={isMaximised ? 'Restore window' : 'Maximise window'}
+            title={isMaximised ? 'Restore' : 'Maximise'}
           >
             <Square className={`h-3.5 w-3.5 ${isMaximised ? 'border-2 border-slate-500 group-hover:border-white' : ''}`} />
           </button>
           <button
             onClick={onQuit}
-            className="flex h-8 w-8 items-center justify-center rounded-xl text-slate-500 transition-all hover:bg-red-500/10 hover:text-red-400 hover:shadow-lg hover:shadow-red-500/5"
+            className="flex h-9 w-11 items-center justify-center rounded-md border border-white/10 bg-white/[0.03] text-slate-400 transition-all hover:bg-red-500/15 hover:text-red-300"
+            aria-label="Close window"
+            title="Close"
           >
             <X className="h-4 w-4" />
           </button>

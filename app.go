@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // App struct
@@ -57,6 +60,49 @@ func (a *App) SaveConfig(configJSON string) error {
 	// Ensure directory exists if it was deleted
 	os.MkdirAll(filepath.Dir(a.configPath), 0755)
 	return os.WriteFile(a.configPath, []byte(configJSON), 0644)
+}
+
+// SelectOutputFolder opens a native directory picker and returns the selected path.
+func (a *App) SelectOutputFolder() (string, error) {
+	folder, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Select output folder for generated documents",
+	})
+	if err != nil {
+		return "", err
+	}
+
+	return folder, nil
+}
+
+// WriteGeneratedFile writes markdown content into a file under the selected output folder.
+func (a *App) WriteGeneratedFile(outputFolder string, relativePath string, content string) (string, error) {
+	baseDir := filepath.Clean(strings.TrimSpace(outputFolder))
+	if baseDir == "" {
+		return "", fmt.Errorf("output folder is required")
+	}
+
+	cleanRelative := filepath.Clean(strings.TrimSpace(relativePath))
+	if cleanRelative == "" || cleanRelative == "." {
+		return "", fmt.Errorf("relative path is required")
+	}
+	if filepath.IsAbs(cleanRelative) || strings.HasPrefix(cleanRelative, "..") {
+		return "", fmt.Errorf("relative path must stay within the selected folder")
+	}
+
+	fullPath := filepath.Clean(filepath.Join(baseDir, cleanRelative))
+	if fullPath != baseDir && !strings.HasPrefix(fullPath, baseDir+string(os.PathSeparator)) {
+		return "", fmt.Errorf("target file is outside the selected folder")
+	}
+
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+		return "", err
+	}
+
+	if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
+		return "", err
+	}
+
+	return fullPath, nil
 }
 
 // Greet returns a greeting for the given name

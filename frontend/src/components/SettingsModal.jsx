@@ -1,7 +1,7 @@
 import { Bot, KeyRound, Sparkles, X, Settings2, ShieldCheck, Cpu, RefreshCw } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useState, useEffect } from 'react';
-import { providerOptions } from '../lib/modelCatalog';
+import { normalizeModelOptions, providerOptions } from '../lib/modelCatalog';
 import { SearchableModelDropdown } from './SearchableModelDropdown';
 import { fetchOpenRouterModels, sortModelsByPopularity } from '../lib/openRouterClient';
 
@@ -19,6 +19,10 @@ export function SettingsModal({
   const [openRouterModels, setOpenRouterModels] = useState([]);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
   const [modelsError, setModelsError] = useState(null);
+  const staticModelOptions = normalizeModelOptions(modelOptions);
+  const searchableModelOptions = provider === 'openrouter' && openRouterModels.length > 0
+    ? openRouterModels
+    : staticModelOptions;
 
   const loadOpenRouterModels = async () => {
     if (!apiKey) {
@@ -62,11 +66,11 @@ export function SettingsModal({
           initial={{ scale: 0.95, opacity: 0, y: 20 }}
           animate={{ scale: 1, opacity: 1, y: 0 }}
           exit={{ scale: 0.95, opacity: 0, y: 20 }}
-          className="relative w-full max-w-xl overflow-hidden rounded-3xl border border-white/10 bg-[#0e151f] shadow-2xl"
+          className="relative w-full max-w-xl rounded-3xl border border-white/10 bg-[#0e151f] shadow-2xl overflow-y-auto max-h-[90vh]"
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
-          <div className="flex items-center justify-between border-b border-white/5 bg-white/5 px-6 py-4">
+          <div className="flex items-center justify-between border-b border-white/5 bg-white/5 px-6 py-4 sticky top-0 z-10">
             <div className="flex items-center gap-3">
               <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-2">
                 <Settings2 className="h-5 w-5 text-cyan-400" />
@@ -81,7 +85,7 @@ export function SettingsModal({
             </button>
           </div>
 
-          <div className="space-y-6 px-6 py-8">
+          <div className="space-y-6 px-6 py-8 overflow-visible">
             {/* Provider Section */}
             <div className="space-y-3">
               <label className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">
@@ -125,29 +129,15 @@ export function SettingsModal({
                   )}
                 </div>
                 
-                {provider === 'openrouter' ? (
-                  <SearchableModelDropdown
-                    value={model}
-                    onChange={onModelChange}
-                    models={openRouterModels.length > 0 ? openRouterModels : modelOptions}
-                    isLoading={isLoadingModels}
-                    error={modelsError}
-                    placeholder="Select or type model ID..."
-                    allowCustom={true}
-                  />
-                ) : (
-                  <select
-                    className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-medium text-slate-200 outline-none transition-colors focus:border-cyan-500/30"
-                    onChange={(e) => onModelChange(e.target.value)}
-                    value={model}
-                  >
-                    {modelOptions.map((opt) => (
-                      <option key={opt} value={opt} className="bg-[#0e151f]">
-                        {opt}
-                      </option>
-                    ))}
-                  </select>
-                )}
+                <SearchableModelDropdown
+                  value={model}
+                  onChange={onModelChange}
+                  models={searchableModelOptions}
+                  isLoading={provider === 'openrouter' ? isLoadingModels : false}
+                  error={provider === 'openrouter' ? modelsError : null}
+                  placeholder={provider === 'openrouter' ? 'Search OpenRouter models...' : 'Search models...'}
+                  allowCustom={false}
+                />
               </div>
 
               <div className="space-y-3">
@@ -174,7 +164,7 @@ export function SettingsModal({
             </div>
           </div>
 
-          <div className="border-t border-white/5 bg-white/5 px-6 py-4 flex justify-end">
+          <div className="border-t border-white/5 bg-white/5 px-6 py-4 flex justify-end sticky bottom-0 z-10">
             <button
               onClick={onClose}
               className="rounded-xl bg-cyan-500 px-6 py-2 text-sm font-bold text-black transition-transform hover:scale-105 active:scale-95"

@@ -6,3 +6,7 @@ export function Greet(arg1:string):Promise<string>;
 export function LoadConfig():Promise<string>;
 
 export function SaveConfig(arg1:string):Promise<void>;
+
+export function SelectOutputFolder():Promise<string>;
+
+export function WriteGeneratedFile(arg1:string,arg2:string,arg3:string):Promise<string>;

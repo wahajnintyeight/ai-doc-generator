@@ -1,4 +1,5 @@
 import { ChevronDown, ChevronRight, FolderTree, FileCode2, Palette, FileText } from 'lucide-react';
+import { motion } from 'framer-motion';
 import clsx from 'clsx';
 
 function fileKindFromName(name) {
@@ -50,20 +51,26 @@ function TreeRow({ item, depth = 0, activePath, onSelect }) {
 
 export function FileExplorer({ tree = [], activePath, onSelect }) {
   return (
-    <aside className="flex h-full flex-col overflow-hidden border-r border-white/10 bg-[#0d1117]/95">
+    <motion.aside
+      initial={{ x: -300, opacity: 0 }}
+      animate={{ x: 0, opacity: 1 }}
+      exit={{ x: -300, opacity: 0 }}
+      transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
+      className="flex h-full flex-col overflow-hidden border-r border-white/10 bg-[#0d1117]/95"
+    >
       <div className="border-b border-white/10 px-4 py-3">
         <p className="text-[10px] font-semibold uppercase tracking-[0.32em] text-slate-400">Document Library</p>
         <p className="mt-1 text-sm text-slate-200">doc-gen-ai</p>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-2 py-3">
+      <div className="custom-scrollbar flex-1 overflow-y-auto px-2 py-3">
         <div className="space-y-1">
           {tree.map((item) => (
             <TreeRow key={item.path ?? item.name} item={item} activePath={activePath} onSelect={onSelect} />
           ))}
         </div>
       </div>
-    </aside>
+    </motion.aside>
   );
 }
 

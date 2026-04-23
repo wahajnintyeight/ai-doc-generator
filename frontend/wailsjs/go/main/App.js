@@ -13,3 +13,11 @@ export function LoadConfig() {
 export function SaveConfig(arg1) {
   return window['go']['main']['App']['SaveConfig'](arg1);
 }
+
+export function SelectOutputFolder() {
+  return window['go']['main']['App']['SelectOutputFolder']();
+}
+
+export function WriteGeneratedFile(arg1, arg2, arg3) {
+  return window['go']['main']['App']['WriteGeneratedFile'](arg1, arg2, arg3);
+}

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ThemeProvider, useTheme } from 'next-themes';
 import { Group as PanelGroup, Panel } from 'react-resizable-panels';
-import { FilePlus2, FileText, FolderOpen, Minus, Square, X } from 'lucide-react';
+import { AnimatePresence } from 'framer-motion';
+import { FilePlus2, FileText, FolderOpen, Minus, Square, X, MessageSquareText } from 'lucide-react';
 import { FileExplorer, makeExplorerTree } from './components/FileExplorer';
 import { MarkdownViewer } from './components/MarkdownViewer';
 import { AgentPane } from './components/AgentPane';
@@ -13,6 +14,7 @@ import { generateDocumentResponse } from './lib/agentClient';
 import { getDefaultModelForProvider, getModelsForProvider } from './lib/modelCatalog';
 import { configManager } from './lib/config';
 import { fetchOpenRouterModels, sortModelsByPopularity } from './lib/openRouterClient';
+import { selectOutputFolder, writeGeneratedFile } from './lib/nativeAppClient';
 import { Quit, WindowIsMaximised, WindowMinimise, WindowToggleMaximise } from '../wailsjs/runtime/runtime';
 
 const themes = [
@@ -32,7 +34,7 @@ const initialFiles = [
 
 function isDocFile(name) {
     const lowerName = name.toLowerCase();
-    return lowerName.endsWith('.md') || lowerName.endsWith('.markdown') || lowerName.endsWith('.txt');
+    return lowerName.endsWith('.md') || lowerName.endsWith('.markdown') || lowerName.endsWith('.txt') || lowerName.endsWith('.doc') || lowerName.endsWith('.docx');
 }
 
 function readFileAsText(file) {
@@ -58,6 +60,20 @@ function AppShell() {
     const [model, setModel] = useState(getDefaultModelForProvider('openai'));
     const [messages, setMessages] = useState([]);
     const [openRouterModels, setOpenRouterModels] = useState([]);
+    const [isGenerating, setIsGenerating] = useState(false);
+    const [agentError, setAgentError] = useState('');
+    const [outputFolder, setOutputFolder] = useState('');
+    const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+    const [isFileExplorerOpen, setIsFileExplorerOpen] = useState(true);
+    const [isAgentPaneOpen, setIsAgentPaneOpen] = useState(true);
+    const openInputId = 'open-doc-input';
+    const importInputId = 'import-doc-input';
+    const modelOptions = useMemo(() => {
+        if (provider === 'openrouter' && openRouterModels.length > 0) {
+            return openRouterModels;
+        }
+        return getModelsForProvider(provider);
+    }, [provider, openRouterModels]);
 
     const loadConfig = async () => {
         try {
@@ -109,18 +125,6 @@ function AppShell() {
             }
         }
     };
-
-    const [isGenerating, setIsGenerating] = useState(false);
-    const [agentError, setAgentError] = useState('');
-    const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-    const openInputId = 'open-doc-input';
-    const importInputId = 'import-doc-input';
-    const modelOptions = useMemo(() => {
-        if (provider === 'openrouter' && openRouterModels.length > 0) {
-            return openRouterModels;
-        }
-        return getModelsForProvider(provider);
-    }, [provider, openRouterModels]);
 
     const hasRuntime = typeof window !== 'undefined' && typeof window.runtime !== 'undefined';
 
@@ -176,13 +180,15 @@ function AppShell() {
 
         if (!file || !isDocFile(file.name)) {
             if (file) {
-                setSelectionHint('Open accepts document files only: .md, .markdown, .txt.');
+                setSelectionHint('Open accepts document files only: .md, .markdown, .txt, .doc, .docx.');
             }
             return;
         }
 
-        const content = await readFileAsText(file);
         const path = `imported/${file.name}`;
+        const content = file.name.toLowerCase().endsWith('.doc') || file.name.toLowerCase().endsWith('.docx')
+            ? 'Office document imported. Preview is limited in the browser, but the file has been loaded into the workspace.'
+            : await readFileAsText(file);
         const nextFile = { name: file.name, path, group: 'root', content };
 
         setFiles((currentFiles) => [nextFile, ...currentFiles.filter((item) => item.path !== path)]);
@@ -198,7 +204,7 @@ function AppShell() {
         const acceptedFiles = pickedFiles.filter((file) => isDocFile(file.name));
 
         if (!acceptedFiles.length) {
-            setSelectionHint('Import accepts document files only: .md, .markdown, .txt.');
+            setSelectionHint('Import accepts document files only: .md, .markdown, .txt, .doc, .docx.');
             return;
         }
 
@@ -207,7 +213,9 @@ function AppShell() {
                 name: file.name,
                 path: `imported/${file.name}`,
                 group: 'root',
-                content: await readFileAsText(file),
+                content: file.name.toLowerCase().endsWith('.doc') || file.name.toLowerCase().endsWith('.docx')
+                    ? 'Office document imported. Preview is limited in the browser, but the file has been loaded into the workspace.'
+                    : await readFileAsText(file),
             }))
         );
 
@@ -218,6 +226,47 @@ function AppShell() {
     };
 
     const runAgentPrompt = async (prompt) => {
+        const ensureOutputFolder = async () => {
+            if (outputFolder) {
+                return outputFolder;
+            }
+
+            const selectedFolder = await selectOutputFolder();
+            if (!selectedFolder) {
+                throw new Error('Generation cancelled: choose an output folder first.');
+            }
+
+            setOutputFolder(selectedFolder);
+            setSelectionHint(`Output folder selected: ${selectedFolder}`);
+            return selectedFolder;
+        };
+
+        const mergeWrittenFilesIntoWorkspace = (writtenFiles, selectedFolder, successPrefix) => {
+            const generatedFiles = writtenFiles.map((writtenFile, index) => {
+                const normalizedRelativePath = String(writtenFile.relativePath || '').replace(/\\\\/g, '/');
+                const fileName = normalizedRelativePath.split('/').pop() || `generated-${Date.now()}-${index + 1}.md`;
+
+                return {
+                    name: fileName,
+                    path: `generated/${normalizedRelativePath}`,
+                    group: 'root',
+                    content: writtenFile.content,
+                };
+            });
+
+            if (!generatedFiles.length) {
+                return;
+            }
+
+            setFiles((currentFiles) => [
+                ...generatedFiles,
+                ...currentFiles.filter((item) => !generatedFiles.some((generatedFile) => generatedFile.path === item.path)),
+            ]);
+            setActivePath(generatedFiles[0].path);
+            setActiveFile(generatedFiles[0]);
+            setSelectionHint(`${successPrefix} ${generatedFiles.length} file${generatedFiles.length > 1 ? 's' : ''} to ${selectedFolder}.`);
+        };
+
         const userMessage = {
             id: `user-${Date.now()}`,
             role: 'user',
@@ -231,34 +280,25 @@ function AppShell() {
         setIsGenerating(true);
 
         try {
+            const selectedFolder = await ensureOutputFolder();
             const response = await generateDocumentResponse({
                 provider,
                 apiKey,
                 model,
                 messages: nextMessages,
                 activeDocument: activeFile,
+                writeFile: ({ relativePath, content }) =>
+                    writeGeneratedFile(selectedFolder, relativePath, content),
             });
 
             const assistantMessage = {
                 id: `assistant-${Date.now()}`,
                 role: 'assistant',
-                content: response,
+                content: response.text,
             };
 
             setMessages((currentMessages) => [...currentMessages, assistantMessage]);
-
-            const generatedId = `generated-${Date.now()}`;
-            const generatedFile = {
-                name: `${generatedId}.md`,
-                path: `generated/${generatedId}.md`,
-                group: 'root',
-                content: response,
-            };
-
-            setFiles((currentFiles) => [generatedFile, ...currentFiles.filter((item) => item.path !== generatedFile.path)]);
-            setActivePath(generatedFile.path);
-            setActiveFile(generatedFile);
-            setSelectionHint('Generated document loaded.');
+            mergeWrittenFilesIntoWorkspace(response.writtenFiles, selectedFolder, 'Generated and wrote');
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : 'Failed to generate document.';
             
@@ -274,6 +314,97 @@ function AppShell() {
         } finally {
             setIsGenerating(false);
         }
+    };
+
+    const regenerateLastMessage = async () => {
+        if (messages.length < 2) return;
+        
+        // Remove the last assistant message
+        const messagesWithoutLast = messages.slice(0, -1);
+        setMessages(messagesWithoutLast);
+        
+        // Get the last user message
+        const lastUserMessage = [...messagesWithoutLast].reverse().find(m => m.role === 'user');
+        if (!lastUserMessage) return;
+        
+        setIsGenerating(true);
+        setAgentError('');
+
+        try {
+            const selectedFolder = outputFolder || await selectOutputFolder();
+            if (!selectedFolder) {
+                throw new Error('Regeneration cancelled: choose an output folder first.');
+            }
+            if (!outputFolder) {
+                setOutputFolder(selectedFolder);
+                setSelectionHint(`Output folder selected: ${selectedFolder}`);
+            }
+
+            const response = await generateDocumentResponse({
+                provider,
+                apiKey,
+                model,
+                messages: messagesWithoutLast,
+                activeDocument: activeFile,
+                writeFile: ({ relativePath, content }) =>
+                    writeGeneratedFile(selectedFolder, relativePath, content),
+            });
+
+            const assistantMessage = {
+                id: `assistant-${Date.now()}`,
+                role: 'assistant',
+                content: response.text,
+            };
+
+            setMessages((currentMessages) => [...currentMessages, assistantMessage]);
+
+            const generatedFiles = response.writtenFiles.map((writtenFile, index) => {
+                const normalizedRelativePath = String(writtenFile.relativePath || '').replace(/\\\\/g, '/');
+                const fileName = normalizedRelativePath.split('/').pop() || `generated-${Date.now()}-${index + 1}.md`;
+
+                return {
+                    name: fileName,
+                    path: `generated/${normalizedRelativePath}`,
+                    group: 'root',
+                    content: writtenFile.content,
+                };
+            });
+
+            if (generatedFiles.length > 0) {
+                setFiles((currentFiles) => [
+                    ...generatedFiles,
+                    ...currentFiles.filter((item) => !generatedFiles.some((generatedFile) => generatedFile.path === item.path)),
+                ]);
+                setActivePath(generatedFiles[0].path);
+                setActiveFile(generatedFiles[0]);
+                setSelectionHint(`Regenerated and wrote ${generatedFiles.length} file${generatedFiles.length > 1 ? 's' : ''} to ${selectedFolder}.`);
+            }
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : 'Failed to regenerate document.';
+            
+            const errorAgentMessage = {
+                id: `error-${Date.now()}`,
+                role: 'error',
+                content: errorMessage,
+            };
+
+            setMessages((currentMessages) => [...currentMessages, errorAgentMessage]);
+            setAgentError(errorMessage);
+        } finally {
+            setIsGenerating(false);
+        }
+    };
+
+    const handleCloseWorkspace = () => {
+        // Reset to initial state
+        setSessionStarted(false);
+        setMessages([]);
+        setFiles(initialFiles);
+        setActivePath('API_DOCS.md');
+        setActiveFile(initialFiles[1]);
+        setOutputFolder('');
+        setAgentError('');
+        setSelectionHint('Workspace closed. Start a new session.');
     };
 
     useEffect(() => {
@@ -322,52 +453,96 @@ function AppShell() {
                 onToggleMaximise={handleToggleMaximise}
                 onQuit={handleQuit}
                 onOpenSettings={() => setIsSettingsOpen(true)}
+                onCloseWorkspace={handleCloseWorkspace}
                 isMaximised={isMaximised}
                 theme={theme}
                 setTheme={updateTheme}
                 selectionHint={selectionHint}
+                sessionStarted={sessionStarted}
             />
 
-            <input id={openInputId} accept=".md,.markdown,.txt" className="hidden" onChange={handleOpenFile} type="file" />
-            <input id={importInputId} accept=".md,.markdown,.txt" className="hidden" multiple onChange={handleImportFiles} type="file" />
+            <input id={openInputId} accept=".md,.markdown,.txt,.doc,.docx" className="hidden" onChange={handleOpenFile} type="file" />
+            <input id={importInputId} accept=".md,.markdown,.txt,.doc,.docx" className="hidden" multiple onChange={handleImportFiles} type="file" />
 
             {sessionStarted ? (
                 <div className="flex min-h-0 flex-1">
                     <PanelGroup direction="horizontal" className="min-h-0 w-full">
-                        <Panel defaultSize={20} minSize={12}>
-                            <FileExplorer tree={explorerTree} activePath={activePath} onSelect={selectFile} />
-                        </Panel>
-                        <ResizeHandle />
-                        <Panel defaultSize={52} minSize={35}>
+                        <AnimatePresence mode="wait">
+                            {isFileExplorerOpen && (
+                                <>
+                                    <Panel defaultSize={20} minSize={12}>
+                                        <FileExplorer tree={explorerTree} activePath={activePath} onSelect={selectFile} />
+                                    </Panel>
+                                    <ResizeHandle />
+                                </>
+                            )}
+                        </AnimatePresence>
+                        <Panel defaultSize={isFileExplorerOpen && isAgentPaneOpen ? 52 : isFileExplorerOpen || isAgentPaneOpen ? 72 : 100} minSize={35}>
                             <div className="flex h-full flex-col">
-                                <div className="flex items-center gap-2 border-b border-white/10 bg-[#10151d] px-4 py-2 text-[11px] uppercase tracking-[0.28em] text-slate-400">
-                                    <FileText className="h-4 w-4 text-cyan-300" />
-                                    {activeFile?.name ?? 'Document'}
+                                <div className="flex items-center justify-between border-b border-white/10 bg-[#10151d] px-4 py-2">
+                                    <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.28em] text-slate-400">
+                                        <FileText className="h-4 w-4 text-cyan-300" />
+                                        {activeFile?.name ?? 'Document'}
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            onClick={() => setIsFileExplorerOpen(!isFileExplorerOpen)}
+                                            className={`rounded-lg p-1.5 transition-colors ${
+                                                isFileExplorerOpen 
+                                                    ? 'bg-cyan-500/10 text-cyan-300 ring-1 ring-cyan-500/20' 
+                                                    : 'text-slate-400 hover:bg-white/5 hover:text-cyan-300'
+                                            }`}
+                                            title={isFileExplorerOpen ? 'Hide File Explorer' : 'Show File Explorer'}
+                                        >
+                                            <FolderOpen className="h-4 w-4" />
+                                        </button>
+                                        <button
+                                            onClick={() => setIsAgentPaneOpen(!isAgentPaneOpen)}
+                                            className={`rounded-lg p-1.5 transition-colors ${
+                                                isAgentPaneOpen 
+                                                    ? 'bg-cyan-500/10 text-cyan-300 ring-1 ring-cyan-500/20' 
+                                                    : 'text-slate-400 hover:bg-white/5 hover:text-cyan-300'
+                                            }`}
+                                            title={isAgentPaneOpen ? 'Hide Agent Pane' : 'Show Agent Pane'}
+                                        >
+                                            <MessageSquareText className="h-4 w-4" />
+                                        </button>
+                                    </div>
                                 </div>
                                 <MarkdownViewer content={activeFile?.content} fileName={activeFile?.name} />
                             </div>
                         </Panel>
-                        <ResizeHandle />
-                        <Panel defaultSize={28} minSize={22}>
-                            <AgentPane
-                                provider={provider}
-                                apiKey={apiKey}
-                                isGenerating={isGenerating}
-                                messages={messages}
-                                model={model}
-                                modelOptions={modelOptions}
-                                onProviderChange={updateProvider}
-                                onApiKeyChange={updateApiKey}
-                                onModelChange={updateModel}
-                                onSendPrompt={runAgentPrompt}
-                                onOpenSettings={() => setIsSettingsOpen(true)}
-                            />
-                        </Panel>
+                        <AnimatePresence mode="wait">
+                            {isAgentPaneOpen && (
+                                <>
+                                    <ResizeHandle />
+                                    <Panel defaultSize={28} minSize={22}>
+                                        <AgentPane
+                                            isGenerating={isGenerating}
+                                            messages={messages}
+                                            provider={provider}
+                                            model={model}
+                                            modelOptions={modelOptions}
+                                            onProviderChange={updateProvider}
+                                            onModelChange={updateModel}
+                                            onSendPrompt={runAgentPrompt}
+                                            onOpenSettings={() => setIsSettingsOpen(true)}
+                                            onRegenerateLastMessage={regenerateLastMessage}
+                                        />
+                                    </Panel>
+                                </>
+                            )}
+                        </AnimatePresence>
                     </PanelGroup>
                 </div>
             ) : (
                 <LandingScreen
                     isGenerating={isGenerating}
+                    provider={provider}
+                    model={model}
+                    modelOptions={modelOptions}
+                    onProviderChange={updateProvider}
+                    onModelChange={updateModel}
                     onStartConversation={runAgentPrompt}
                     onOpenSettings={() => setIsSettingsOpen(true)}
                 />
