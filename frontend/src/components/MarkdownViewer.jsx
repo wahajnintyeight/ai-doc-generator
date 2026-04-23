@@ -1,4 +1,4 @@
-import { FileCode2, Hash, Info, Quote, Sparkles } from 'lucide-react';
+import { Hash, Info, Quote, Sparkles } from 'lucide-react';
 
 function fallbackContent(fileName) {
   return `# ${fileName}\n\nOpen or import a document to preview it here.`;

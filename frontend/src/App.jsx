@@ -4,7 +4,15 @@ import { Group as PanelGroup, Panel } from 'react-resizable-panels';
 import { FilePlus2, FileText, FolderOpen, Minus, Square, X } from 'lucide-react';
 import { FileExplorer, makeExplorerTree } from './components/FileExplorer';
 import { MarkdownViewer } from './components/MarkdownViewer';
+import { AgentPane } from './components/AgentPane';
+import { LandingScreen } from './components/LandingScreen';
+import { SettingsModal } from './components/SettingsModal';
+import { Toolbar } from './components/Toolbar';
 import { ResizeHandle } from './components/ResizeHandle';
+import { generateDocumentResponse } from './lib/agentClient';
+import { getDefaultModelForProvider, getModelsForProvider } from './lib/modelCatalog';
+import { configManager } from './lib/config';
+import { fetchOpenRouterModels, sortModelsByPopularity } from './lib/openRouterClient';
 import { Quit, WindowIsMaximised, WindowMinimise, WindowToggleMaximise } from '../wailsjs/runtime/runtime';
 
 const themes = [
@@ -24,7 +32,7 @@ const initialFiles = [
 
 function isDocFile(name) {
     const lowerName = name.toLowerCase();
-    return lowerName.endsWith('.md') || lowerName.endsWith('.markdown') || lowerName.endsWith('.txt') || lowerName.endsWith('.doc') || lowerName.endsWith('.docx');
+    return lowerName.endsWith('.md') || lowerName.endsWith('.markdown') || lowerName.endsWith('.txt');
 }
 
 function readFileAsText(file) {
@@ -43,9 +51,76 @@ function AppShell() {
     const [files, setFiles] = useState(initialFiles);
     const [activePath, setActivePath] = useState('API_DOCS.md');
     const [activeFile, setActiveFile] = useState(initialFiles[1]);
-    const [selectionHint, setSelectionHint] = useState('Open a document to read it, or import multiple local docs.');
+    const [selectionHint, setSelectionHint] = useState('');
+    const [sessionStarted, setSessionStarted] = useState(false);
+    const [provider, setProvider] = useState('openai');
+    const [apiKey, setApiKey] = useState('');
+    const [model, setModel] = useState(getDefaultModelForProvider('openai'));
+    const [messages, setMessages] = useState([]);
+    const [openRouterModels, setOpenRouterModels] = useState([]);
+
+    const loadConfig = async () => {
+        try {
+            const config = await configManager.init();
+            if (config) {
+                if (config.theme) {
+                    setTheme(config.theme);
+                    configManager.applyTheme();
+                }
+                if (config.provider) setProvider(config.provider);
+                if (config.apiKey) setApiKey(config.apiKey);
+                if (config.model) setModel(config.model);
+            }
+        } catch (err) {
+            console.error('Config init error:', err);
+        }
+    };
+
+    const updateTheme = (nextTheme) => {
+        setTheme(nextTheme);
+        configManager.set('theme', nextTheme);
+    };
+
+    const updateProvider = (nextProvider) => {
+        setProvider(nextProvider);
+        const nextModel = getDefaultModelForProvider(nextProvider);
+        setModel(nextModel);
+        configManager.update({ provider: nextProvider, model: nextModel });
+    };
+
+    const updateApiKey = (nextKey) => {
+        setApiKey(nextKey);
+        configManager.set('apiKey', nextKey);
+    };
+
+    const updateModel = (nextModel) => {
+        setModel(nextModel);
+        configManager.set('model', nextModel);
+    };
+
+    const loadOpenRouterModelsIfNeeded = async () => {
+        if (provider === 'openrouter' && apiKey && openRouterModels.length === 0) {
+            try {
+                const models = await fetchOpenRouterModels(apiKey);
+                const sortedModels = sortModelsByPopularity(models);
+                setOpenRouterModels(sortedModels);
+            } catch (error) {
+                console.error('Failed to load OpenRouter models:', error);
+            }
+        }
+    };
+
+    const [isGenerating, setIsGenerating] = useState(false);
+    const [agentError, setAgentError] = useState('');
+    const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const openInputId = 'open-doc-input';
     const importInputId = 'import-doc-input';
+    const modelOptions = useMemo(() => {
+        if (provider === 'openrouter' && openRouterModels.length > 0) {
+            return openRouterModels;
+        }
+        return getModelsForProvider(provider);
+    }, [provider, openRouterModels]);
 
     const hasRuntime = typeof window !== 'undefined' && typeof window.runtime !== 'undefined';
 
@@ -142,8 +217,72 @@ function AppShell() {
         setSelectionHint(`Imported ${importedFiles.length} document file${importedFiles.length > 1 ? 's' : ''}.`);
     };
 
+    const runAgentPrompt = async (prompt) => {
+        const userMessage = {
+            id: `user-${Date.now()}`,
+            role: 'user',
+            content: prompt,
+        };
+
+        const nextMessages = [...messages, userMessage];
+        setMessages(nextMessages);
+        setSessionStarted(true); // Start session immediately to show messages
+        setAgentError('');
+        setIsGenerating(true);
+
+        try {
+            const response = await generateDocumentResponse({
+                provider,
+                apiKey,
+                model,
+                messages: nextMessages,
+                activeDocument: activeFile,
+            });
+
+            const assistantMessage = {
+                id: `assistant-${Date.now()}`,
+                role: 'assistant',
+                content: response,
+            };
+
+            setMessages((currentMessages) => [...currentMessages, assistantMessage]);
+
+            const generatedId = `generated-${Date.now()}`;
+            const generatedFile = {
+                name: `${generatedId}.md`,
+                path: `generated/${generatedId}.md`,
+                group: 'root',
+                content: response,
+            };
+
+            setFiles((currentFiles) => [generatedFile, ...currentFiles.filter((item) => item.path !== generatedFile.path)]);
+            setActivePath(generatedFile.path);
+            setActiveFile(generatedFile);
+            setSelectionHint('Generated document loaded.');
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : 'Failed to generate document.';
+            
+            // Add error as an agent message with error role
+            const errorAgentMessage = {
+                id: `error-${Date.now()}`,
+                role: 'error',
+                content: errorMessage,
+            };
+
+            setMessages((currentMessages) => [...currentMessages, errorAgentMessage]);
+            setAgentError(errorMessage); // Keep for potential other uses
+        } finally {
+            setIsGenerating(false);
+        }
+    };
+
     useEffect(() => {
-        setMounted(true);
+        const initialize = async () => {
+            await loadConfig();
+            setMounted(true);
+        };
+
+        initialize();
 
         if (!hasRuntime) {
             return;
@@ -162,109 +301,93 @@ function AppShell() {
         };
     }, []);
 
+    useEffect(() => {
+        if (isSettingsOpen) {
+            loadOpenRouterModelsIfNeeded();
+        }
+    }, [isSettingsOpen, provider, apiKey]);
+
+    const explorerTree = useMemo(() => makeExplorerTree(files, activePath), [files, activePath]);
+
     if (!mounted) {
         return null;
     }
 
-    const explorerTree = useMemo(() => makeExplorerTree(files, activePath), [files, activePath]);
-
     return (
         <div className="flex h-screen w-full flex-col overflow-hidden bg-base text-base-foreground">
-            <header className="flex h-14 items-stretch border-b border-white/8 bg-[#0c1016]/92 backdrop-blur" style={{ '--wails-draggable': 'drag' }}>
-                <div className="flex flex-1 items-center gap-4 px-4" style={{ '--wails-draggable': 'drag' }}>
-                    <div className="select-none">
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.32em] text-accent-foreground">Doc Reader</p>
-                        <p className="mt-0.5 text-sm text-base-foreground/90">Local markdown and document preview</p>
-                    </div>
-                    <div className="hidden xl:block text-[11px] text-accent-foreground/80">
-                        {selectionHint}
-                    </div>
-                </div>
+            <Toolbar 
+                onOpen={() => document.getElementById(openInputId)?.click()}
+                onImport={() => document.getElementById(importInputId)?.click()}
+                onMinimise={handleMinimise}
+                onToggleMaximise={handleToggleMaximise}
+                onQuit={handleQuit}
+                onOpenSettings={() => setIsSettingsOpen(true)}
+                isMaximised={isMaximised}
+                theme={theme}
+                setTheme={updateTheme}
+                selectionHint={selectionHint}
+            />
 
-                <div className="flex items-center gap-3 px-4" style={{ '--wails-draggable': 'none' }}>
-                    <div className="flex items-center gap-2 rounded-xl border border-panel-border/70 bg-black/20 p-1">
-                        <button
-                            className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-base-foreground transition hover:bg-white/5"
-                            onClick={() => document.getElementById(openInputId)?.click()}
-                            type="button"
-                        >
-                            <FolderOpen className="h-4 w-4 text-cyan-300" />
-                            Open
-                        </button>
-                        <button
-                            className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-base-foreground transition hover:bg-white/5"
-                            onClick={() => document.getElementById(importInputId)?.click()}
-                            type="button"
-                        >
-                            <FilePlus2 className="h-4 w-4 text-cyan-300" />
-                            Import
-                        </button>
-                    </div>
+            <input id={openInputId} accept=".md,.markdown,.txt" className="hidden" onChange={handleOpenFile} type="file" />
+            <input id={importInputId} accept=".md,.markdown,.txt" className="hidden" multiple onChange={handleImportFiles} type="file" />
 
-                    <select
-                        value={theme}
-                        onChange={(e) => setTheme(e.target.value)}
-                        className="rounded-lg border border-panel-border bg-black/20 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-base-foreground outline-none"
-                    >
-                        {themes.map((item) => (
-                            <option key={item.value} value={item.value}>
-                                {item.name}
-                            </option>
-                        ))}
-                    </select>
-
-                    <div className="ml-2 flex items-center gap-1 rounded-xl border border-panel-border/70 bg-black/20 p-1" style={{ '--wails-draggable': 'none' }}>
-                        <button
-                            aria-label="Minimise window"
-                            className="rounded-lg p-2 text-accent-foreground transition hover:bg-white/5 hover:text-base-foreground"
-                            onClick={handleMinimise}
-                            type="button"
-                        >
-                            <Minus className="h-4 w-4" />
-                        </button>
-                        <button
-                            aria-label={isMaximised ? 'Restore window' : 'Maximise window'}
-                            className="rounded-lg p-2 text-accent-foreground transition hover:bg-white/5 hover:text-base-foreground"
-                            onClick={handleToggleMaximise}
-                            type="button"
-                        >
-                            {isMaximised ? <Square className="h-4 w-4" /> : <Square className="h-4 w-4" />}
-                        </button>
-                        <button
-                            aria-label="Close window"
-                            className="rounded-lg p-2 text-accent-foreground transition hover:bg-red-500/15 hover:text-red-300"
-                            onClick={handleQuit}
-                            type="button"
-                        >
-                            <X className="h-4 w-4" />
-                        </button>
-                    </div>
-                </div>
-            </header>
-
-            <input id={openInputId} accept=".md,.markdown,.txt,.doc,.docx" className="hidden" onChange={handleOpenFile} type="file" />
-            <input id={importInputId} accept=".md,.markdown,.txt,.doc,.docx" className="hidden" multiple onChange={handleImportFiles} type="file" />
-
-            <div className="flex min-h-0 flex-1">
-                <PanelGroup direction="horizontal" className="min-h-0 w-full">
-                    <Panel defaultSize={22} minSize={12}>
-                        <FileExplorer tree={explorerTree} activePath={activePath} onSelect={selectFile} />
-                    </Panel>
-                    <ResizeHandle />
-                    <Panel defaultSize={78} minSize={45}>
-                        <div className="flex h-full flex-col">
-                            <div className="flex items-center gap-2 border-b border-white/10 bg-[#10151d] px-4 py-2 text-[11px] uppercase tracking-[0.28em] text-slate-400">
-                                <FileText className="h-4 w-4 text-cyan-300" />
-                                {activeFile?.name ?? 'Document'}
+            {sessionStarted ? (
+                <div className="flex min-h-0 flex-1">
+                    <PanelGroup direction="horizontal" className="min-h-0 w-full">
+                        <Panel defaultSize={20} minSize={12}>
+                            <FileExplorer tree={explorerTree} activePath={activePath} onSelect={selectFile} />
+                        </Panel>
+                        <ResizeHandle />
+                        <Panel defaultSize={52} minSize={35}>
+                            <div className="flex h-full flex-col">
+                                <div className="flex items-center gap-2 border-b border-white/10 bg-[#10151d] px-4 py-2 text-[11px] uppercase tracking-[0.28em] text-slate-400">
+                                    <FileText className="h-4 w-4 text-cyan-300" />
+                                    {activeFile?.name ?? 'Document'}
+                                </div>
+                                <MarkdownViewer content={activeFile?.content} fileName={activeFile?.name} />
                             </div>
-                            <MarkdownViewer content={activeFile?.content} fileName={activeFile?.name} />
-                        </div>
-                    </Panel>
-                </PanelGroup>
-            </div>
+                        </Panel>
+                        <ResizeHandle />
+                        <Panel defaultSize={28} minSize={22}>
+                            <AgentPane
+                                provider={provider}
+                                apiKey={apiKey}
+                                isGenerating={isGenerating}
+                                messages={messages}
+                                model={model}
+                                modelOptions={modelOptions}
+                                onProviderChange={updateProvider}
+                                onApiKeyChange={updateApiKey}
+                                onModelChange={updateModel}
+                                onSendPrompt={runAgentPrompt}
+                                onOpenSettings={() => setIsSettingsOpen(true)}
+                            />
+                        </Panel>
+                    </PanelGroup>
+                </div>
+            ) : (
+                <LandingScreen
+                    isGenerating={isGenerating}
+                    onStartConversation={runAgentPrompt}
+                    onOpenSettings={() => setIsSettingsOpen(true)}
+                />
+            )}
+
+            <SettingsModal
+                isOpen={isSettingsOpen}
+                onClose={() => setIsSettingsOpen(false)}
+                provider={provider}
+                apiKey={apiKey}
+                model={model}
+                modelOptions={modelOptions}
+                onProviderChange={updateProvider}
+                onApiKeyChange={updateApiKey}
+                onModelChange={updateModel}
+            />
         </div>
     );
 }
+
 
 function App() {
     return (
