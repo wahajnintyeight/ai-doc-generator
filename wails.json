@@ -1,0 +1,13 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "doc-gen-ai",
+  "outputfilename": "doc-gen-ai",
+  "frontend:install": "npm install",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "author": {
+    "name": "Wahaj",
+    "email": "wahajdorift@yahoo.com"
+  }
+}

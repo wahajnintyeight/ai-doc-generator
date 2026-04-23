@@ -1,0 +1,47 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-base: 255 255 255;
+  --color-panel: 249 250 251;
+  --color-border: 229 231 235;
+  --color-accent: 243 244 246;
+  --color-accent-foreground: 107 114 128;
+  --color-primary: 59 130 246;
+  --color-base-foreground: 31 41 55;
+  --color-alert: 239 68 68;
+  --color-alert-bg: 254 242 242;
+}
+
+.dark {
+  --color-base: 10 10 10;
+  --color-panel: 20 20 20;
+  --color-border: 38 38 38;
+  --color-accent: 40 40 40;
+  --color-accent-foreground: 163 163 163;
+  --color-primary: 96 165 250;
+  --color-base-foreground: 229 231 235;
+  --color-alert: 248 113 113;
+  --color-alert-bg: 69 10 10;
+}
+
+/* Dracula theme example */
+[data-theme='dracula'] {
+  --color-base: 40 42 54;
+  --color-panel: 33 34 44;
+  --color-border: 68 71 90;
+  --color-accent: 68 71 90;
+  --color-accent-foreground: 248 248 242;
+  --color-primary: 189 147 249;
+  --color-base-foreground: 248 248 242;
+  --color-alert: 255 85 85;
+  --color-alert-bg: 68 71 90;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
