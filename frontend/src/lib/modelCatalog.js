@@ -17,6 +17,16 @@ export const modelsByProvider = {
     { id: 'xiaomi/mimo-v2.5-pro', name: 'Xiaomi: MiMo-V2.5-Pro', description: 'Flagship model for complex software engineering' },
     { id: 'xiaomi/mimo-v2.5', name: 'Xiaomi: MiMo-V2.5', description: 'Native omnimodal model with multimodal perception' },
     { id: 'openai/gpt-5.4-image-2', name: 'OpenAI: GPT-5.4 Image 2', description: 'Multimodal with image generation capabilities' },
+    { id: 'relace/relace-search', name: 'Relace: Relace Search', description: 'Agentic codebase exploration and file discovery' },
+    { id: 'z-ai/glm-4.6v', name: 'Z.ai: GLM 4.6V', description: 'High-fidelity visual understanding and long-context reasoning' },
+    { id: 'nex-agi/deepseek-v3.1-nex-n1', name: 'Nex AGI: DeepSeek V3.1 Nex N1', description: 'Agentic coding model with tool-use focus' },
+    { id: 'essentialai/rnj-1-instruct', name: 'EssentialAI: Rnj 1 Instruct', description: 'Programming, math, and scientific reasoning model' },
+    { id: 'openrouter/bodybuilder', name: 'Body Builder (beta)', description: 'Transforms natural language into structured OpenRouter API request objects' },
+    { id: 'openai/gpt-5.1-codex-max', name: 'OpenAI: GPT-5.1-Codex-Max', description: 'Long-running, high-context software development model' },
+    { id: 'amazon/nova-2-lite-v1', name: 'Amazon: Nova 2 Lite', description: 'Fast, cost-effective reasoning model for everyday workloads' },
+    { id: 'mistralai/ministral-14b-2512', name: 'Mistral: Ministral 3 14B 2512', description: 'Frontier-capable efficient language model' },
+    { id: 'mistralai/ministral-8b-2512', name: 'Mistral: Ministral 3 8B 2512', description: 'Balanced tiny language model with vision capabilities' },
+    { id: 'mistralai/ministral-3b-2512', name: 'Mistral: Ministral 3 3B 2512', description: 'Small efficient tiny language model with vision capabilities' },
     { id: 'inclusionai/ling-2.6-flash:free', name: 'inclusionAI: Ling-2.6-flash (free)', description: 'Fast responses with high token efficiency', free: true },
     { id: 'inclusionai/ling-2.6-1t:free', name: 'inclusionAI: Ling-2.6-1T (free)', description: 'Instant instruct model for fast, efficient agent workflows', free: true },
     { id: '~anthropic/claude-opus-latest', name: 'Anthropic: Claude Opus Latest', description: 'Latest model in Claude Opus family' },
@@ -65,6 +75,7 @@ export function normalizeModelOptions(modelOptions = []) {
         id: model.id,
         name: model.name || model.id,
         description: model.description || '',
+        free: Boolean(model.free),
       };
     })
     .filter(Boolean);

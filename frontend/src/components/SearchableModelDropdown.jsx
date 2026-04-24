@@ -3,6 +3,14 @@ import { createPortal } from 'react-dom';
 import { ChevronDown, Search, Loader2, AlertCircle, Settings, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
+function isFreeModel(model) {
+  if (typeof model !== 'object' || model === null) {
+    return false;
+  }
+
+  return model.free === true || String(model.id || '').endsWith(':free');
+}
+
 export function SearchableModelDropdown({
   value,
   onChange,
@@ -122,6 +130,13 @@ export function SearchableModelDropdown({
     setSearchQuery('');
   };
 
+  const renderFreeBadge = (model) =>
+    isFreeModel(model) ? (
+      <span className="inline-flex items-center border border-green-500/40 bg-green-500/10 px-2 py-0.5 font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-green-300 shadow-[1px_1px_0px_0px_rgba(0,0,0,0.45)]">
+        Free
+      </span>
+    ) : null;
+
   const handleInputChange = (e) => {
     const newValue = e.target.value;
     setInputValue(newValue);
@@ -208,7 +223,6 @@ export function SearchableModelDropdown({
                       const modelName =
                         typeof model === 'string' ? model : model.name || model.id;
                       const modelDesc = typeof model === 'string' ? null : model.description;
-                      const isFree = typeof model === 'object' && model.free === true;
                       const isSelected = modelId === value;
 
                       const tier =
@@ -237,11 +251,7 @@ export function SearchableModelDropdown({
                                   <Check className="h-4 w-4 flex-shrink-0 text-primary" />
                                 )}
                                 <span className="text-sm font-medium break-words">{modelName}</span>
-                                {isFree && (
-                                  <span className="inline-flex items-center rounded-md bg-green-500/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-green-400 border border-green-500/30">
-                                    Free
-                                  </span>
-                                )}
+                                {renderFreeBadge(model)}
                               </div>
                               {modelDesc && (
                                 <div className="mt-0.5 line-clamp-1 text-xs text-slate-500">
@@ -269,7 +279,6 @@ export function SearchableModelDropdown({
                   const modelName =
                     typeof model === 'string' ? model : model.name || model.id;
                   const modelDesc = typeof model === 'string' ? null : model.description;
-                  const isFree = typeof model === 'object' && model.free === true;
                   const isSelected = modelId === value;
 
                   const tier =
@@ -298,11 +307,7 @@ export function SearchableModelDropdown({
                                 <Check className="h-4 w-4 flex-shrink-0 text-primary" />
                             )}
                             <span className="text-sm font-medium break-words">{modelName}</span>
-                            {isFree && (
-                              <span className="inline-flex items-center rounded-md bg-green-500/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-green-400 border border-green-500/30">
-                                Free
-                              </span>
-                            )}
+                            {renderFreeBadge(model)}
                           </div>
                           {modelDesc && (
                             <div className="mt-0.5 line-clamp-1 text-xs text-slate-500">

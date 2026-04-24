@@ -8,6 +8,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { MessageActions } from './MessageActions';
 import { PromptComposer } from './PromptComposer';
+import { ToolCallIndicator } from './ToolCallIndicator';
 
 function MessageBubble({ message, onRegenerate, canRegenerate }) {
   const [showReasoning, setShowReasoning] = useState(true);
@@ -105,6 +106,8 @@ export function AgentPane({
   modelOptions = [],
   onProviderChange,
   onModelChange,
+  activeToolCalls = [],
+  completedToolCalls = [],
 }) {
   const scrollRef = useRef(null);
 
@@ -159,6 +162,14 @@ export function AgentPane({
         ) : (
           messages.map((m) => <MessageBubble key={m.id} message={m} />)
         )}
+        <AnimatePresence>
+          {(activeToolCalls.length > 0 || completedToolCalls.length > 0) && (
+            <ToolCallIndicator
+              toolCalls={activeToolCalls}
+              completedToolCalls={completedToolCalls}
+            />
+          )}
+        </AnimatePresence>
         <div ref={scrollRef} />
       </div>
 

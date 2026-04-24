@@ -1,9 +1,6 @@
-import { createGoogleGenerativeAI } from '@ai-sdk/google';
-import { createOpenAI } from '@ai-sdk/openai';
-import { createOpenRouter } from '@openrouter/ai-sdk-provider';
-import { generateText, streamText, tool } from 'ai';
-import { z } from 'zod';
-import { getDefaultModelForProvider } from './modelCatalog';
+import { generateText, streamText } from 'ai';
+import { createProviderAdapter } from './providers/index.js';
+import { createDocumentTools } from './tools/documentTools.js';
 
 const SYSTEM_PROMPT = [
   'You are a professional document generation assistant.',
@@ -88,7 +85,38 @@ function parseStructuredToolCalls(text) {
   return toolCalls;
 }
 
-function buildLocalResponseText({ responseText, writtenFiles }) {
+function summarizeExecutedToolCalls(toolCalls = []) {
+  if (!toolCalls.length) {
+    return '';
+  }
+
+  const summaryParts = [];
+  const seen = new Set();
+
+  toolCalls.forEach((toolCall) => {
+    const toolName = String(toolCall?.toolName || '').trim();
+    if (!toolName) {
+      return;
+    }
+
+    const relativePath = String(toolCall?.args?.relativePath || '').trim();
+    const key = `${toolName}:${relativePath}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+
+    summaryParts.push(relativePath ? `${toolName}(${relativePath})` : toolName);
+  });
+
+  if (!summaryParts.length) {
+    return '';
+  }
+
+  return `Executed tool call${summaryParts.length > 1 ? 's' : ''}: ${summaryParts.join(', ')}.`;
+}
+
+function buildLocalResponseText({ responseText, writtenFiles, executedToolCalls = [] }) {
   const cleanedText = String(responseText || '')
     .replace(/TOOL_CALL>\[.*?\]>/g, '')
     .replace(/<TOOL_CALL>.*?<\/TOOL_CALL>/g, '')
@@ -101,16 +129,21 @@ function buildLocalResponseText({ responseText, writtenFiles }) {
   }
 
   if (writtenFiles.length > 0) {
-    return cleanedText || `Wrote ${writtenFiles.length} file(s).`;
+    return cleanedText || `No final text was returned, but I wrote ${writtenFiles.length} file(s) successfully.`;
+  }
+
+  const executedToolsSummary = summarizeExecutedToolCalls(executedToolCalls);
+  if (executedToolsSummary) {
+    return cleanedText || `No final text was returned. ${executedToolsSummary}`;
   }
 
   const structuredToolCalls = parseStructuredToolCalls(cleanedText);
   if (structuredToolCalls.length > 0) {
     const toolNames = [...new Set(structuredToolCalls.map((toolCall) => toolCall.toolName))];
-    return `Tool request: ${toolNames.join(', ')}.`;
+    return `No final text was returned. Tool request: ${toolNames.join(', ')}.`;
   }
 
-  return cleanedText || 'No text response returned.';
+  return cleanedText || 'No final text was returned. The model likely emitted only tool activity or an incomplete response.';
 }
 
 function documentContext(activeDocument) {
@@ -134,120 +167,7 @@ function buildSystemPrompt(activeDocument, outputFolder) {
 }
 
 function getProviderModel({ provider, apiKey, model }) {
-  const selectedProvider = provider || 'openai';
-  const selectedModel = model || getDefaultModelForProvider(selectedProvider);
-
-  if (selectedProvider === 'openrouter') {
-    const openrouter = createOpenRouter({ apiKey });
-    return openrouter.chat(selectedModel);
-  }
-
-  if (selectedProvider === 'gemini') {
-    const google = createGoogleGenerativeAI({ apiKey });
-    return google(selectedModel);
-  }
-
-  const openai = createOpenAI({ apiKey });
-  return openai(selectedModel);
-}
-
-function buildTools({ activeDocument, outputFolder, writeFile, readFile, writtenFiles }) {
-  return {
-    get_active_document: tool({
-      description: 'Get currently loaded document content and name for context-aware generation.',
-      inputSchema: z.object({}),
-      execute: async () => ({
-        name: activeDocument?.name || 'untitled.md',
-        content: String(activeDocument?.content || ''),
-      }),
-    }),
-    create_document_outline: tool({
-      description: 'Create a concise markdown document outline from a title and purpose.',
-      inputSchema: z.object({
-        title: z.string().min(3),
-        purpose: z.string().min(3),
-      }),
-      execute: async ({ title, purpose }) => {
-        return {
-          markdown: [
-            `# ${title}`,
-            '',
-            '## Purpose',
-            purpose,
-            '',
-            '## Scope',
-            '- In scope',
-            '- Out of scope',
-            '',
-            '## Key Requirements',
-            '- Requirement 1',
-            '- Requirement 2',
-            '',
-            '## Implementation Plan',
-            '1. Step one',
-            '2. Step two',
-            '',
-            '## Risks',
-            '- Risk and mitigation',
-          ].join('\n'),
-        };
-      },
-    }),
-    read_document_file: tool({
-      description: 'Read a document file from the selected output folder before modifying it.',
-      inputSchema: z.object({
-        relativePath: z
-          .string()
-          .min(1)
-          .describe('Relative file path like docs/api-reference.md. Must not be absolute.'),
-      }),
-      execute: async ({ relativePath }) => {
-        if (!readFile) {
-          throw new Error('File reading is unavailable.');
-        }
-
-        const content = await readFile({ relativePath });
-        return {
-          ok: true,
-          relativePath,
-          content: String(content || ''),
-        };
-      },
-    }),
-    write_document_file: tool({
-      description: 'Write a generated markdown file to disk using a relative path. The file will be created inside the user-selected output folder. Always use a simple relative path (e.g. docs/api-reference.md) — never include the output folder path itself.',
-      inputSchema: z.object({
-        relativePath: z
-          .string()
-          .min(1)
-          .describe('Relative file path like docs/api-reference.md. Must not be absolute and must not include the output folder path.'),
-        content: z
-          .string()
-          .min(1)
-          .describe('Complete markdown content to write into the file.'),
-      }),
-      execute: async ({ relativePath, content }) => {
-        const normalizedPath = String(relativePath || '').replace(/\\/g, '/').trim();
-        const trimmedContent = String(content || '').trim();
-        const absolutePath = await writeFile({
-          relativePath: normalizedPath,
-          content: trimmedContent,
-        });
-
-        const record = {
-          relativePath: normalizedPath,
-          absolutePath,
-          content: trimmedContent,
-        };
-        writtenFiles.push(record);
-
-        return {
-          ok: true,
-          ...record,
-        };
-      },
-    }),
-  };
+  return createProviderAdapter({ provider, apiKey, model }).createModel();
 }
 
 function createToolEventEmitter(onToolCall, onToolResult) {
@@ -301,7 +221,7 @@ function createAgentClient({
 }) {
   const resolvedModel = getProviderModel({ provider, apiKey, model });
   const writtenFiles = [];
-  const tools = buildTools({
+  const tools = createDocumentTools({
     activeDocument,
     outputFolder,
     readFile,
@@ -341,7 +261,11 @@ function createAgentClient({
     }
 
     const responseText = String(response.text || '').trim();
-    const cleanedText = buildLocalResponseText({ responseText, writtenFiles });
+    const cleanedText = buildLocalResponseText({
+      responseText,
+      writtenFiles,
+      executedToolCalls: getToolCalls(response),
+    });
 
     return {
       text: cleanedText,
@@ -381,7 +305,11 @@ function createAgentClient({
     }
 
     const responseText = fullText.trim();
-    const summary = buildLocalResponseText({ responseText, writtenFiles });
+    const summary = buildLocalResponseText({
+      responseText,
+      writtenFiles,
+      executedToolCalls: getToolCalls(result),
+    });
 
     onFinish?.({
       text: summary,
@@ -416,27 +344,27 @@ function parseTextToolCalls(text) {
   if (structuredToolCalls.length > 0) {
     return structuredToolCalls;
   }
-  
+
   // Match patterns like: CALL>[{"name": "tool_name", "arguments": {...}}]>
   const callPattern = /CALL>\s*\[?\s*\{[^}]*"name"\s*:\s*"([^"]+)"[^}]*"arguments"\s*:\s*(\{[^}]*\})[^\]]*\]?\s*>/gi;
-  
+
   let match;
   while ((match = callPattern.exec(text)) !== null) {
     try {
       const toolName = match[1];
       const argsStr = match[2];
       const args = JSON.parse(argsStr);
-      
+
       toolCalls.push({
         toolCallId: `text-${Date.now()}-${Math.random()}`,
         toolName,
         args,
       });
-    } catch (e) {
-      console.warn('Failed to parse text tool call:', match[0], e);
+    } catch (error) {
+      console.warn('Failed to parse text tool call:', match[0], error);
     }
   }
-  
+
   return toolCalls;
 }
 
