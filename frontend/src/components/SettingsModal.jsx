@@ -72,8 +72,8 @@ export function SettingsModal({
           {/* Header */}
           <div className="flex items-center justify-between border-b border-white/5 bg-white/5 px-6 py-4 sticky top-0 z-10">
             <div className="flex items-center gap-3">
-              <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/10 p-2">
-                <Settings2 className="h-5 w-5 text-cyan-400" />
+                <div className="rounded-xl border border-primary/20 bg-primary/10 p-2">
+                  <Settings2 className="h-5 w-5 text-primary" />
               </div>
               <h2 className="text-lg font-semibold text-white">Environment Settings</h2>
             </div>
@@ -89,7 +89,7 @@ export function SettingsModal({
             {/* Provider Section */}
             <div className="space-y-3">
               <label className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">
-                <Sparkles className="h-3 w-3 text-cyan-500" />
+                <Sparkles className="h-3 w-3 text-primary" />
                 AI Provider
               </label>
               <div className="grid grid-cols-3 gap-3">
@@ -99,7 +99,7 @@ export function SettingsModal({
                     onClick={() => onProviderChange(opt.value)}
                     className={`flex flex-col items-center gap-2 rounded-2xl border p-4 transition-all ${
                       provider === opt.value
-                        ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-200'
+                        ? 'border-primary/40 bg-primary/10 text-primary'
                         : 'border-white/5 bg-white/5 text-slate-400 hover:border-white/10 hover:bg-white/10'
                     }`}
                   >
@@ -114,14 +114,14 @@ export function SettingsModal({
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <label className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">
-                    <Cpu className="h-3 w-3 text-cyan-500" />
+                    <Cpu className="h-3 w-3 text-primary" />
                     Model Selection
                   </label>
                   {provider === 'openrouter' && (
                     <button
                       onClick={loadOpenRouterModels}
                       disabled={!apiKey || isLoadingModels}
-                      className="rounded-lg p-1 text-slate-400 transition-colors hover:bg-white/10 hover:text-cyan-400 disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="rounded-lg p-1 text-slate-400 transition-colors hover:bg-white/10 hover:text-primary disabled:opacity-50 disabled:cursor-not-allowed"
                       title="Refresh models"
                     >
                       <RefreshCw className={`h-3 w-3 ${isLoadingModels ? 'animate-spin' : ''}`} />
@@ -142,7 +142,7 @@ export function SettingsModal({
 
               <div className="space-y-3">
                 <label className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">
-                  <KeyRound className="h-3 w-3 text-cyan-500" />
+                  <KeyRound className="h-3 w-3 text-primary" />
                   Secret API Key
                 </label>
                 <input
@@ -150,7 +150,7 @@ export function SettingsModal({
                   value={apiKey}
                   onChange={(e) => onApiKeyChange(e.target.value)}
                   placeholder="sk-..."
-                  className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-mono text-slate-200 outline-none transition-colors focus:border-cyan-500/30"
+                  className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-mono text-slate-200 outline-none transition-colors focus:border-primary/30"
                 />
               </div>
             </div>
@@ -167,7 +167,7 @@ export function SettingsModal({
           <div className="border-t border-white/5 bg-white/5 px-6 py-4 flex justify-end sticky bottom-0 z-10">
             <button
               onClick={onClose}
-              className="rounded-xl bg-cyan-500 px-6 py-2 text-sm font-bold text-black transition-transform hover:scale-105 active:scale-95"
+              className="rounded-xl bg-primary px-6 py-2 text-sm font-bold text-black transition-transform hover:scale-105 active:scale-95"
             >
               Save Configuration
             </button>

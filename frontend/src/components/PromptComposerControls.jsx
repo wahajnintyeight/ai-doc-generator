@@ -121,7 +121,7 @@ export function PromptComposerControls({
       </div>
 
       {/* Unified Model Selector with Provider Groups */}
-      <div className="min-w-[280px] sm:min-w-[360px]">
+      <div className="flex-1 min-w-[200px]">
         <SearchableModelDropdown
           value={model}
           onChange={(selectedModel) => {
@@ -138,7 +138,7 @@ export function PromptComposerControls({
           models={groupedModelOptions}
           placeholder="Select model..."
           grouped={true}
-          className="h-10 !bg-white/5 hover:!bg-white/10 !border-white/5 !rounded-xl !text-xs sm:!text-sm"
+          className="h-10 w-full !bg-white/5 hover:!bg-white/10 !border-white/5 !rounded-xl !text-xs sm:!text-sm"
         />
       </div>
     </div>

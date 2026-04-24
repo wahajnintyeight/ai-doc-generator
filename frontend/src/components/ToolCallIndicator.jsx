@@ -32,7 +32,7 @@ function ToolCallItem({ toolCall, isCompleted }) {
       className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-sm ${
         isCompleted
           ? 'border-green-500/30 bg-green-500/10'
-          : 'border-cyan-500/30 bg-cyan-500/10'
+          : 'border-primary/30 bg-primary/10'
       }`}
     >
       <div className="mt-0.5">
@@ -43,13 +43,13 @@ function ToolCallItem({ toolCall, isCompleted }) {
             animate={{ rotate: 360 }}
             transition={{ duration: 2, repeat: Infinity, ease: 'linear' }}
           >
-            <Icon className="h-4 w-4 text-cyan-400" />
+            <Icon className="h-4 w-4 text-primary" />
           </motion.div>
         )}
       </div>
       
       <div className="flex-1 min-w-0">
-        <p className={`font-medium ${isCompleted ? 'text-green-200' : 'text-cyan-200'}`}>
+        <p className={`font-medium ${isCompleted ? 'text-green-200' : 'text-primary'}`}>
           {label}
         </p>
         {(path || title) && (

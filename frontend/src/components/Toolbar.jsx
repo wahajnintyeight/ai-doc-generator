@@ -41,7 +41,7 @@ export function Toolbar({
       {/* Brand & Status */}
       <div className="flex flex-1 items-center gap-6" style={{ '--wails-draggable': 'drag' }}>
         <div className="flex flex-col">
-          <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-cyan-500/80">
+          <p className="text-[10px] font-bold uppercase tracking-[0.25em] text-primary/80">
             Synthesis
           </p>
           <h1 className="text-xs font-semibold text-slate-200">Doc Architect</h1>
@@ -66,7 +66,7 @@ export function Toolbar({
             className="group flex h-8 items-center gap-2 rounded-xl px-3 text-[11px] font-bold uppercase tracking-wider text-slate-400 transition-all hover:bg-white/5 hover:text-white"
             title="Open Document"
           >
-            <FolderOpen className="h-4 w-4 text-cyan-500 transition-transform group-hover:scale-110" />
+            <FolderOpen className="h-4 w-4 text-primary transition-transform group-hover:scale-110" />
             <span>Open</span>
           </button>
           <div className="h-4 w-px bg-white/5" />
@@ -75,7 +75,7 @@ export function Toolbar({
             className="group flex h-8 items-center gap-2 rounded-xl px-3 text-[11px] font-bold uppercase tracking-wider text-slate-400 transition-all hover:bg-white/5 hover:text-white"
             title="Import Documents"
           >
-            <FilePlus2 className="h-4 w-4 text-cyan-500 transition-transform group-hover:scale-110" />
+            <FilePlus2 className="h-4 w-4 text-primary transition-transform group-hover:scale-110" />
             <span>Import</span>
           </button>
           {sessionStarted && (
@@ -104,7 +104,7 @@ export function Toolbar({
                   onClick={() => setTheme(t.value)}
                   className={`flex h-7 w-7 items-center justify-center rounded-lg transition-all ${
                     theme === t.value 
-                      ? 'bg-cyan-500/10 text-cyan-400 shadow-sm shadow-cyan-500/20' 
+                        ? 'bg-primary/10 text-primary shadow-sm shadow-primary/20' 
                       : 'text-slate-500 hover:bg-white/5 hover:text-slate-300'
                   }`}
                   title={`${t.name} Theme`}

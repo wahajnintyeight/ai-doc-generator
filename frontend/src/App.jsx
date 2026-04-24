@@ -3,7 +3,7 @@ import { ThemeProvider, useTheme } from 'next-themes';
 import { Group as PanelGroup, Panel } from 'react-resizable-panels';
 import { AnimatePresence } from 'framer-motion';
 import { FilePlus2, FileText, FolderOpen, Minus, Square, X, MessageSquareText } from 'lucide-react';
-import { FileExplorer, makeExplorerTree } from './components/FileExplorer';
+import { FileExplorer, fileKindFromName } from './components/FileExplorer';
 import { MarkdownViewer } from './components/MarkdownViewer';
 import { AgentPane } from './components/AgentPane';
 import { LandingScreen } from './components/LandingScreen';
@@ -14,7 +14,7 @@ import { generateDocumentResponse } from './lib/agentClient';
 import { getDefaultModelForProvider, getModelsForProvider } from './lib/modelCatalog';
 import { configManager } from './lib/config';
 import { fetchOpenRouterModels, sortModelsByPopularity } from './lib/openRouterClient';
-import { loadSession, readGeneratedFile, saveSession, selectOutputFolder, writeGeneratedFile } from './lib/nativeAppClient';
+import { listGeneratedFiles, loadSession, readGeneratedFile, saveSession, selectOutputFolder, writeGeneratedFile } from './lib/nativeAppClient';
 import { Quit, WindowIsMaximised, WindowMinimise, WindowToggleMaximise } from '../wailsjs/runtime/runtime';
 
 const themes = [
@@ -54,6 +54,89 @@ function findActiveFile(nextFiles, nextActivePath) {
     );
 }
 
+function findFirstTreeFile(nodes) {
+    for (const node of nodes) {
+        if (node.type === 'file') {
+            return node;
+        }
+
+        if (Array.isArray(node.children) && node.children.length > 0) {
+            const child = findFirstTreeFile(node.children);
+            if (child) {
+                return child;
+            }
+        }
+    }
+
+    return null;
+}
+
+function findTreeFileByPath(nodes, targetPath) {
+    for (const node of nodes) {
+        if (node.type === 'file' && node.path === targetPath) {
+            return node;
+        }
+
+        if (Array.isArray(node.children) && node.children.length > 0) {
+            const child = findTreeFileByPath(node.children, targetPath);
+            if (child) {
+                return child;
+            }
+        }
+    }
+
+    return null;
+}
+
+function treeContainsPath(nodes, targetPath) {
+    for (const node of nodes) {
+        if (node.path === targetPath) {
+            return true;
+        }
+
+        if (Array.isArray(node.children) && node.children.length > 0 && treeContainsPath(node.children, targetPath)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+async function buildWorkspaceTree(folderPath, relativePath = '') {
+    const entries = await listGeneratedFiles(folderPath, relativePath);
+
+    const sortedEntries = [...entries].sort((left, right) => {
+        if (left.isDir !== right.isDir) {
+            return left.isDir ? -1 : 1;
+        }
+
+        return String(left.name).localeCompare(String(right.name));
+    });
+
+    const nodes = [];
+    for (const entry of sortedEntries) {
+        if (entry.isDir) {
+            nodes.push({
+                type: 'folder',
+                name: entry.name,
+                path: entry.path,
+                open: true,
+                children: await buildWorkspaceTree(folderPath, entry.path),
+            });
+            continue;
+        }
+
+        nodes.push({
+            type: 'file',
+            name: entry.name,
+            path: entry.path,
+            icon: fileKindFromName(entry.name),
+        });
+    }
+
+    return nodes;
+}
+
 function buildSessionPayload({
     messages,
     files,
@@ -78,35 +161,32 @@ function buildSessionPayload({
 
 function AppShell() {
     const { theme, setTheme } = useTheme();
-    const [mounted, setMounted] = useState(false);
-    const [isMaximised, setIsMaximised] = useState(false);
+    const [provider, setProvider] = useState('openrouter');
+    const [apiKey, setApiKey] = useState('');
+    const [model, setModel] = useState(getDefaultModelForProvider('openrouter'));
+    const [openRouterModels, setOpenRouterModels] = useState([]);
+    const [messages, setMessages] = useState([]);
     const [files, setFiles] = useState(initialFiles);
     const [activePath, setActivePath] = useState('API_DOCS.md');
     const [activeFile, setActiveFile] = useState(initialFiles[1]);
+    const [outputFolder, setOutputFolder] = useState('');
     const [selectionHint, setSelectionHint] = useState('');
     const [sessionStarted, setSessionStarted] = useState(false);
-    const [sessionLoaded, setSessionLoaded] = useState(false);
-    const [provider, setProvider] = useState('openai');
-    const [apiKey, setApiKey] = useState('');
-    const [model, setModel] = useState(getDefaultModelForProvider('openai'));
-    const [messages, setMessages] = useState([]);
-    const [openRouterModels, setOpenRouterModels] = useState([]);
-    const [isGenerating, setIsGenerating] = useState(false);
-    const [agentError, setAgentError] = useState('');
-    const [outputFolder, setOutputFolder] = useState('');
-    const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [isFileExplorerOpen, setIsFileExplorerOpen] = useState(true);
     const [isAgentPaneOpen, setIsAgentPaneOpen] = useState(true);
+    const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+    const [isGenerating, setIsGenerating] = useState(false);
     const [activeToolCalls, setActiveToolCalls] = useState([]);
     const [completedToolCalls, setCompletedToolCalls] = useState([]);
-    const openInputId = 'open-doc-input';
-    const importInputId = 'import-doc-input';
-    const modelOptions = useMemo(() => {
-        if (provider === 'openrouter' && openRouterModels.length > 0) {
-            return openRouterModels;
-        }
-        return getModelsForProvider(provider);
-    }, [provider, openRouterModels]);
+    const [isMaximised, setIsMaximised] = useState(false);
+    const [workspaceTree, setWorkspaceTree] = useState([]);
+    const [isWorkspaceLoading, setIsWorkspaceLoading] = useState(false);
+    const [syncOperationCount, setSyncOperationCount] = useState(0);
+    const [agentError, setAgentError] = useState('');
+    const [sessionLoaded, setSessionLoaded] = useState(false);
+    const [mounted, setMounted] = useState(false);
+    const openInputId = 'open-file-input';
+    const importInputId = 'import-files-input';
 
     const loadConfig = async () => {
         try {
@@ -159,6 +239,14 @@ function AppShell() {
         }
     };
 
+    const modelOptions = useMemo(() => {
+        if (provider === 'openrouter' && openRouterModels.length > 0) {
+            return openRouterModels;
+        }
+
+        return getModelsForProvider(provider);
+    }, [provider, openRouterModels]);
+
     const hasRuntime = typeof window !== 'undefined' && typeof window.runtime !== 'undefined';
 
     const refreshWindowState = async () => {
@@ -205,6 +293,125 @@ function AppShell() {
         setActivePath(file.path);
         setActiveFile(file);
         setSelectionHint(`Loaded ${file.name}.`);
+    };
+
+    const updateFileContent = (targetPath, nextContent) => {
+        const content = String(nextContent ?? '');
+
+        setFiles((currentFiles) => currentFiles.map((file) => (file.path === targetPath ? { ...file, content } : file)));
+        setActiveFile((currentFile) => (currentFile?.path === targetPath ? { ...currentFile, content } : currentFile));
+    };
+
+    const updateActiveFileContent = (nextContent) => {
+        updateFileContent(activePath, nextContent);
+    };
+
+    const saveActiveFileContent = async (nextContent) => {
+        const content = String(nextContent ?? '');
+
+        setSyncOperationCount((count) => count + 1);
+        updateActiveFileContent(content);
+
+        try {
+            if (outputFolder && activeFile?.path) {
+                await writeGeneratedFile(outputFolder, activeFile.path, content);
+                setSelectionHint(`Saved ${activeFile.name} to ${outputFolder}.`);
+            } else {
+                setSelectionHint(`Updated ${activeFile.name} in the preview.`);
+            }
+        } catch (error) {
+            console.error('Failed to save markdown source:', error);
+            setSelectionHint(`Updated ${activeFile.name} locally, but could not save it to disk.`);
+        } finally {
+            setSyncOperationCount((count) => Math.max(0, count - 1));
+        }
+    };
+
+    const selectWorkspaceFolder = async () => {
+        const selectedFolder = await selectOutputFolder();
+        if (!selectedFolder) {
+            setSelectionHint('Folder selection cancelled.');
+            return;
+        }
+
+        setOutputFolder(selectedFolder);
+        setSelectionHint(`Folder selected: ${selectedFolder}`);
+        setSessionStarted(true);
+    };
+
+    const selectWorkspaceFile = async (fileNode) => {
+        if (!outputFolder || fileNode.type !== 'file') {
+            return;
+        }
+
+        try {
+            const content = await readGeneratedFile(outputFolder, fileNode.path);
+            const nextFile = { name: fileNode.name, path: fileNode.path, group: 'workspace', content };
+
+            setFiles((currentFiles) => [nextFile, ...currentFiles.filter((item) => item.path !== nextFile.path)]);
+            setActivePath(nextFile.path);
+            setActiveFile(nextFile);
+            setSelectionHint(`Loaded ${fileNode.name} from ${outputFolder}.`);
+        } catch (error) {
+            console.error('Workspace file load error:', error);
+            setSelectionHint(`Unable to open ${fileNode.name}.`);
+        }
+    };
+
+    const toggleWorkspaceFolder = (folderPath) => {
+        setWorkspaceTree((currentTree) => {
+            const toggleNode = (nodes) => nodes.map((node) => {
+                if (node.type !== 'folder') {
+                    return node;
+                }
+
+                if (node.path === folderPath) {
+                    return { ...node, open: !node.open };
+                }
+
+                if (!Array.isArray(node.children) || node.children.length === 0) {
+                    return node;
+                }
+
+                return { ...node, children: toggleNode(node.children) };
+            });
+
+            return toggleNode(currentTree);
+        });
+    };
+
+    const loadWorkspaceFolder = async (folderPath, preferredActivePath = activePath) => {
+        if (!folderPath) {
+            setWorkspaceTree([]);
+            return [];
+        }
+
+        setIsWorkspaceLoading(true);
+
+        try {
+            const nextTree = await buildWorkspaceTree(folderPath);
+            setWorkspaceTree(nextTree);
+
+            const nextFileNode = findTreeFileByPath(nextTree, preferredActivePath) || findFirstTreeFile(nextTree);
+
+            if (nextFileNode) {
+                const content = await readGeneratedFile(folderPath, nextFileNode.path);
+                const nextFile = { name: nextFileNode.name, path: nextFileNode.path, group: 'workspace', content };
+
+                setFiles((currentFiles) => [nextFile, ...currentFiles.filter((item) => item.path !== nextFile.path)]);
+                setActivePath(nextFile.path);
+                setActiveFile(nextFile);
+            }
+
+            return nextTree;
+        } catch (error) {
+            console.error('Workspace folder load error:', error);
+            setWorkspaceTree([]);
+            setSelectionHint('Unable to read the selected folder.');
+            return [];
+        } finally {
+            setIsWorkspaceLoading(false);
+        }
     };
 
     const handleOpenFile = async (event) => {
@@ -263,14 +470,11 @@ function AppShell() {
             if (outputFolder) {
                 return outputFolder;
             }
-
-            const selectedFolder = await selectOutputFolder();
+            const selectedFolder = await selectWorkspaceFolder();
             if (!selectedFolder) {
                 throw new Error('Generation cancelled: choose an output folder first.');
             }
 
-            setOutputFolder(selectedFolder);
-            setSelectionHint(`Output folder selected: ${selectedFolder}`);
             return selectedFolder;
         };
 
@@ -298,6 +502,7 @@ function AppShell() {
             setActivePath(generatedFiles[0].path);
             setActiveFile(generatedFiles[0]);
             setSelectionHint(`${successPrefix} ${generatedFiles.length} file${generatedFiles.length > 1 ? 's' : ''} to ${selectedFolder}.`);
+            void loadWorkspaceFolder(selectedFolder, generatedFiles[0].path);
         };
 
         const userMessage = {
@@ -324,8 +529,19 @@ function AppShell() {
                 activeDocument: activeFile,
                 outputFolder: selectedFolder,
                 readFile: ({ relativePath }) => readGeneratedFile(selectedFolder, relativePath),
-                writeFile: ({ relativePath, content }) =>
-                    writeGeneratedFile(selectedFolder, relativePath, content),
+                writeFile: async ({ relativePath, content }) => {
+                    const targetPath = String(relativePath || '');
+                    const nextContent = String(content ?? '');
+
+                    setSyncOperationCount((count) => count + 1);
+                    updateFileContent(targetPath, nextContent);
+
+                    try {
+                        return await writeGeneratedFile(selectedFolder, targetPath, nextContent);
+                    } finally {
+                        setSyncOperationCount((count) => Math.max(0, count - 1));
+                    }
+                },
                 onToolCall: (toolCall) => {
                     setActiveToolCalls((prev) => [...prev, toolCall]);
                 },
@@ -386,10 +602,9 @@ function AppShell() {
             if (!selectedFolder) {
                 throw new Error('Regeneration cancelled: choose an output folder first.');
             }
-            if (!outputFolder) {
-                setOutputFolder(selectedFolder);
-                setSelectionHint(`Output folder selected: ${selectedFolder}`);
-            }
+
+            setOutputFolder(selectedFolder);
+            setSelectionHint(`Folder selected: ${selectedFolder}`);
 
             const response = await generateDocumentResponse({
                 provider,
@@ -399,8 +614,19 @@ function AppShell() {
                 activeDocument: activeFile,
                 outputFolder: selectedFolder,
                 readFile: ({ relativePath }) => readGeneratedFile(selectedFolder, relativePath),
-                writeFile: ({ relativePath, content }) =>
-                    writeGeneratedFile(selectedFolder, relativePath, content),
+                writeFile: async ({ relativePath, content }) => {
+                    const targetPath = String(relativePath || '');
+                    const nextContent = String(content ?? '');
+
+                    setSyncOperationCount((count) => count + 1);
+                    updateFileContent(targetPath, nextContent);
+
+                    try {
+                        return await writeGeneratedFile(selectedFolder, targetPath, nextContent);
+                    } finally {
+                        setSyncOperationCount((count) => Math.max(0, count - 1));
+                    }
+                },
                 onToolCall: (toolCall) => {
                     setActiveToolCalls((prev) => [...prev, toolCall]);
                 },
@@ -438,6 +664,7 @@ function AppShell() {
                 setActivePath(generatedFiles[0].path);
                 setActiveFile(generatedFiles[0]);
                 setSelectionHint(`Regenerated and wrote ${generatedFiles.length} file${generatedFiles.length > 1 ? 's' : ''} to ${selectedFolder}.`);
+                void loadWorkspaceFolder(selectedFolder, generatedFiles[0].path);
             }
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : 'Failed to regenerate document.';
@@ -468,6 +695,7 @@ function AppShell() {
         setActivePath('API_DOCS.md');
         setActiveFile(initialFiles[1]);
         setOutputFolder('');
+        setWorkspaceTree([]);
         setAgentError('');
         setSelectionHint('Workspace closed. Start a new session.');
     };
@@ -535,6 +763,19 @@ function AppShell() {
             return;
         }
 
+        if (!outputFolder) {
+            setWorkspaceTree([]);
+            return;
+        }
+
+        void loadWorkspaceFolder(outputFolder, activePath);
+    }, [outputFolder, sessionLoaded]);
+
+    useEffect(() => {
+        if (!sessionLoaded) {
+            return;
+        }
+
         const timeoutId = window.setTimeout(() => {
             void saveSession(
                 buildSessionPayload({
@@ -565,7 +806,7 @@ function AppShell() {
         sessionStarted,
     ]);
 
-    const explorerTree = useMemo(() => makeExplorerTree(files, activePath), [files, activePath]);
+    const explorerTree = useMemo(() => workspaceTree, [workspaceTree]);
 
     if (!mounted) {
         return null;
@@ -598,7 +839,15 @@ function AppShell() {
                             {isFileExplorerOpen && (
                                 <>
                                     <Panel defaultSize={20} minSize={12}>
-                                        <FileExplorer tree={explorerTree} activePath={activePath} onSelect={selectFile} />
+                                        <FileExplorer
+                                            tree={explorerTree}
+                                            activePath={activePath}
+                                            onChooseFolder={selectWorkspaceFolder}
+                                            onSelect={selectWorkspaceFile}
+                                            onToggleFolder={toggleWorkspaceFolder}
+                                            selectedFolder={outputFolder}
+                                            isLoading={isWorkspaceLoading}
+                                        />
                                     </Panel>
                                     <ResizeHandle />
                                 </>
@@ -608,7 +857,7 @@ function AppShell() {
                             <div className="flex h-full flex-col">
                                 <div className="flex items-center justify-between border-b border-white/10 bg-[#10151d] px-4 py-2">
                                     <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.28em] text-slate-400">
-                                        <FileText className="h-4 w-4 text-cyan-300" />
+                                        <FileText className="h-4 w-4 text-primary" />
                                         {activeFile?.name ?? 'Document'}
                                     </div>
                                     <div className="flex items-center gap-2">
@@ -616,8 +865,8 @@ function AppShell() {
                                             onClick={() => setIsFileExplorerOpen(!isFileExplorerOpen)}
                                             className={`rounded-lg p-1.5 transition-colors ${
                                                 isFileExplorerOpen 
-                                                    ? 'bg-cyan-500/10 text-cyan-300 ring-1 ring-cyan-500/20' 
-                                                    : 'text-slate-400 hover:bg-white/5 hover:text-cyan-300'
+                                                    ? 'bg-primary/10 text-primary ring-1 ring-primary/20' 
+                                                    : 'text-slate-400 hover:bg-white/5 hover:text-primary'
                                             }`}
                                             title={isFileExplorerOpen ? 'Hide File Explorer' : 'Show File Explorer'}
                                         >
@@ -627,8 +876,8 @@ function AppShell() {
                                             onClick={() => setIsAgentPaneOpen(!isAgentPaneOpen)}
                                             className={`rounded-lg p-1.5 transition-colors ${
                                                 isAgentPaneOpen 
-                                                    ? 'bg-cyan-500/10 text-cyan-300 ring-1 ring-cyan-500/20' 
-                                                    : 'text-slate-400 hover:bg-white/5 hover:text-cyan-300'
+                                                    ? 'bg-primary/10 text-primary ring-1 ring-primary/20' 
+                                                    : 'text-slate-400 hover:bg-white/5 hover:text-primary'
                                             }`}
                                             title={isAgentPaneOpen ? 'Hide Agent Pane' : 'Show Agent Pane'}
                                         >
@@ -636,7 +885,14 @@ function AppShell() {
                                         </button>
                                     </div>
                                 </div>
-                                <MarkdownViewer content={activeFile?.content} fileName={activeFile?.name} />
+                                <MarkdownViewer
+                                    content={activeFile?.content}
+                                    fileName={activeFile?.name}
+                                    isEditable={Boolean(activeFile?.path)}
+                                    isSyncing={isGenerating || activeToolCalls.length > 0 || syncOperationCount > 0}
+                                    onContentChange={updateActiveFileContent}
+                                    onSaveContent={saveActiveFileContent}
+                                />
                             </div>
                         </Panel>
                         <AnimatePresence mode="wait">

@@ -1,5 +1,6 @@
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createOpenAI } from '@ai-sdk/openai';
+import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { generateText, streamText, tool } from 'ai';
 import { z } from 'zod';
 import { getDefaultModelForProvider } from './modelCatalog';
@@ -13,17 +14,103 @@ const SYSTEM_PROMPT = [
   'Use read_document_file when you need to check existing content before modifying.',
   'Use create_document_outline when the user wants a structured outline.',
   'For general questions, greetings, or conversations, respond naturally without using tools.',
+  'If native tool calling is unavailable, respond with one JSON object and nothing else: {"type":"message","text":"..."} for normal replies or {"type":"tool_call","toolName":"...","args":{...}} when requesting a tool.',
+  'Never return an empty response.',
   'Always provide safe relative paths like docs/overview.md when writing files.',
   'IMPORTANT: Call tools using the function calling interface, never output tool calls as text.',
 ].join(' ');
 
 function normalizeMessages(messages) {
   return messages
-    .filter((message) => message.role === 'user' || message.role === 'assistant')
+    .filter((message) => (message.role === 'user' || message.role === 'assistant') && String(message.content || '').trim().length > 0)
     .map((message) => ({
       role: message.role,
       content: message.content,
     }));
+}
+
+function prepareConversation(messages) {
+  return normalizeMessages(messages).slice(-4);
+}
+
+function extractStructuredPayload(text) {
+  const trimmed = String(text || '').trim();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  const fencedMatch = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  const candidate = fencedMatch ? fencedMatch[1].trim() : trimmed;
+
+  try {
+    return JSON.parse(candidate);
+  } catch {
+    return null;
+  }
+}
+
+function parseStructuredMessage(text) {
+  const payload = extractStructuredPayload(text);
+
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return null;
+  }
+
+  if (payload.type === 'message' && typeof payload.text === 'string') {
+    return payload.text.trim();
+  }
+
+  return null;
+}
+
+function parseStructuredToolCalls(text) {
+  const payload = extractStructuredPayload(text);
+  const values = Array.isArray(payload) ? payload : payload ? [payload] : [];
+  const toolCalls = [];
+
+  values.forEach((value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return;
+    }
+
+    if (value.type !== 'tool_call' || typeof value.toolName !== 'string' || !value.toolName.trim()) {
+      return;
+    }
+
+    toolCalls.push({
+      toolCallId: `structured-${Date.now()}-${Math.random()}`,
+      toolName: value.toolName.trim(),
+      args: value.args && typeof value.args === 'object' ? value.args : {},
+    });
+  });
+
+  return toolCalls;
+}
+
+function buildLocalResponseText({ responseText, writtenFiles }) {
+  const cleanedText = String(responseText || '')
+    .replace(/TOOL_CALL>\[.*?\]>/g, '')
+    .replace(/<TOOL_CALL>.*?<\/TOOL_CALL>/g, '')
+    .replace(/\[TOOL_CALL\].*?\[\/TOOL_CALL\]/g, '')
+    .trim();
+
+  const structuredMessage = parseStructuredMessage(cleanedText);
+  if (structuredMessage) {
+    return structuredMessage;
+  }
+
+  if (writtenFiles.length > 0) {
+    return cleanedText || `Wrote ${writtenFiles.length} file(s).`;
+  }
+
+  const structuredToolCalls = parseStructuredToolCalls(cleanedText);
+  if (structuredToolCalls.length > 0) {
+    const toolNames = [...new Set(structuredToolCalls.map((toolCall) => toolCall.toolName))];
+    return `Tool request: ${toolNames.join(', ')}.`;
+  }
+
+  return cleanedText || 'No text response returned.';
 }
 
 function documentContext(activeDocument) {
@@ -41,16 +128,17 @@ function outputFolderContext(outputFolder) {
   return `Output folder (all generated files will be written here): ${outputFolder}`;
 }
 
+function buildSystemPrompt(activeDocument, outputFolder) {
+  const folderCtx = outputFolderContext(outputFolder);
+  return `${SYSTEM_PROMPT}\n\n${documentContext(activeDocument)}${folderCtx ? `\n\n${folderCtx}` : ''}`;
+}
+
 function getProviderModel({ provider, apiKey, model }) {
   const selectedProvider = provider || 'openai';
   const selectedModel = model || getDefaultModelForProvider(selectedProvider);
 
   if (selectedProvider === 'openrouter') {
-    const openrouter = createOpenAI({
-      apiKey,
-      baseURL: 'https://openrouter.ai/api/v1',
-      name: 'openrouter',
-    });
+    const openrouter = createOpenRouter({ apiKey });
     return openrouter.chat(selectedModel);
   }
 
@@ -84,7 +172,7 @@ function buildTools({ activeDocument, outputFolder, writeFile, readFile, written
           markdown: [
             `# ${title}`,
             '',
-            `## Purpose`,
+            '## Purpose',
             purpose,
             '',
             '## Scope',
@@ -139,7 +227,7 @@ function buildTools({ activeDocument, outputFolder, writeFile, readFile, written
           .describe('Complete markdown content to write into the file.'),
       }),
       execute: async ({ relativePath, content }) => {
-        const normalizedPath = String(relativePath || '').replace(/\\\\/g, '/').trim();
+        const normalizedPath = String(relativePath || '').replace(/\\/g, '/').trim();
         const trimmedContent = String(content || '').trim();
         const absolutePath = await writeFile({
           relativePath: normalizedPath,
@@ -162,6 +250,156 @@ function buildTools({ activeDocument, outputFolder, writeFile, readFile, written
   };
 }
 
+function createToolEventEmitter(onToolCall, onToolResult) {
+  return {
+    emitToolCalls(result) {
+      if (!onToolCall && !onToolResult) {
+        return;
+      }
+
+      const toolCalls = getToolCalls(result);
+      toolCalls.forEach((toolCall) => {
+        onToolCall?.({
+          toolCallId: toolCall.toolCallId,
+          toolName: toolCall.toolName,
+          args: toolCall.args,
+        });
+        onToolResult?.({
+          toolCallId: toolCall.toolCallId,
+          toolName: toolCall.toolName,
+          result: toolCall.result,
+        });
+      });
+
+      const textToolCalls = parseTextToolCalls(result.text || '');
+      textToolCalls.forEach((toolCall) => {
+        onToolCall?.(toolCall);
+        setTimeout(() => {
+          onToolResult?.({
+            toolCallId: toolCall.toolCallId,
+            toolName: toolCall.toolName,
+            result: { note: 'Model attempted tool call but lacks proper function calling support' },
+          });
+        }, 1500);
+      });
+    },
+  };
+}
+
+function createAgentClient({
+  provider,
+  apiKey,
+  model,
+  activeDocument,
+  outputFolder,
+  readFile,
+  writeFile,
+  onToolCall,
+  onToolResult,
+  onTextDelta,
+  onFinish,
+}) {
+  const resolvedModel = getProviderModel({ provider, apiKey, model });
+  const writtenFiles = [];
+  const tools = buildTools({
+    activeDocument,
+    outputFolder,
+    readFile,
+    writeFile,
+    writtenFiles,
+  });
+  const toolEvents = createToolEventEmitter(onToolCall, onToolResult);
+
+  function createBaseRequest(messages) {
+    return {
+      model: resolvedModel,
+      system: buildSystemPrompt(activeDocument, outputFolder),
+      messages,
+      tools,
+      maxSteps: 5,
+    };
+  }
+
+  async function generate(messages) {
+    const firstPass = await generateText(createBaseRequest(messages));
+
+    toolEvents.emitToolCalls(firstPass);
+
+    const shouldRetry = !writtenFiles.length
+      && firstPass.finishReason !== 'stop'
+      && (hasToolCall(firstPass, 'read_document_file') || hasToolCall(firstPass, 'create_document_outline'));
+
+    const response = shouldRetry
+      ? await generateText({
+        ...createBaseRequest(messages),
+        system: `${buildSystemPrompt(activeDocument, outputFolder)}\n\nYou already gathered context. If the user requested document generation, complete it now by calling write_document_file with the final markdown output.`,
+      })
+      : firstPass;
+
+    if (response !== firstPass) {
+      toolEvents.emitToolCalls(response);
+    }
+
+    const responseText = String(response.text || '').trim();
+    const cleanedText = buildLocalResponseText({ responseText, writtenFiles });
+
+    return {
+      text: cleanedText,
+      writtenFiles,
+    };
+  }
+
+  async function stream(messages) {
+    const result = await streamText({
+      model: resolvedModel,
+      system: buildSystemPrompt(activeDocument, outputFolder),
+      messages,
+      tools,
+      maxSteps: 5,
+      onChunk: ({ chunk }) => {
+        if (chunk.type === 'tool-call') {
+          onToolCall?.({
+            toolCallId: chunk.toolCallId,
+            toolName: chunk.toolName,
+            args: chunk.args,
+          });
+        } else if (chunk.type === 'tool-result') {
+          onToolResult?.({
+            toolCallId: chunk.toolCallId,
+            toolName: chunk.toolName,
+            result: chunk.result,
+          });
+        } else if (chunk.type === 'text-delta') {
+          onTextDelta?.(chunk.textDelta);
+        }
+      },
+    });
+
+    let fullText = '';
+    for await (const textPart of result.textStream) {
+      fullText += textPart;
+    }
+
+    const responseText = fullText.trim();
+    const summary = buildLocalResponseText({ responseText, writtenFiles });
+
+    onFinish?.({
+      text: summary,
+      writtenFiles,
+    });
+
+    return {
+      text: summary,
+      writtenFiles,
+    };
+  }
+
+  return {
+    generate,
+    stream,
+  };
+}
+
 function getToolCalls(result) {
   return (result.steps || []).flatMap((step) => step.toolCalls || []);
 }
@@ -173,6 +411,11 @@ function hasToolCall(result, toolName) {
 function parseTextToolCalls(text) {
   // Parse tool calls that models output as text instead of proper function calls
   const toolCalls = [];
+
+  const structuredToolCalls = parseStructuredToolCalls(text);
+  if (structuredToolCalls.length > 0) {
+    return structuredToolCalls;
+  }
   
   // Match patterns like: CALL>[{"name": "tool_name", "arguments": {...}}]>
   const callPattern = /CALL>\s*\[?\s*\{[^}]*"name"\s*:\s*"([^"]+)"[^}]*"arguments"\s*:\s*(\{[^}]*\})[^\]]*\]?\s*>/gi;
@@ -197,118 +440,6 @@ function parseTextToolCalls(text) {
   return toolCalls;
 }
 
-async function generateWithAdaptiveTooling({
-  resolvedModel,
-  activeDocument,
-  outputFolder,
-  conversation,
-  readFile,
-  writeFile,
-  onToolCall,
-  onToolResult,
-}) {
-  const writtenFiles = [];
-  const tools = buildTools({
-    activeDocument,
-    outputFolder,
-    readFile,
-    writeFile,
-    writtenFiles,
-  });
-  const folderCtx = outputFolderContext(outputFolder);
-  const baseRequest = {
-    model: resolvedModel,
-    system: `${SYSTEM_PROMPT}\n\n${documentContext(activeDocument)}${folderCtx ? `\n\n${folderCtx}` : ''}`,
-    messages: conversation,
-    tools,
-    maxSteps: 5,
-  };
-
-  const firstPass = await generateText(baseRequest);
-
-  // Emit tool calls if callbacks provided
-  if (onToolCall || onToolResult) {
-    const toolCalls = getToolCalls(firstPass);
-    toolCalls.forEach(tc => {
-      onToolCall?.({
-        toolCallId: tc.toolCallId,
-        toolName: tc.toolName,
-        args: tc.args,
-      });
-      onToolResult?.({
-        toolCallId: tc.toolCallId,
-        toolName: tc.toolName,
-        result: tc.result,
-      });
-    });
-    
-    // Also check for text-based tool calls (for models that don't support proper function calling)
-    const textToolCalls = parseTextToolCalls(firstPass.text || '');
-    textToolCalls.forEach(tc => {
-      onToolCall?.(tc);
-      // Mark as completed immediately since we can't actually execute them
-      setTimeout(() => {
-        onToolResult?.({
-          toolCallId: tc.toolCallId,
-          toolName: tc.toolName,
-          result: { note: 'Model attempted tool call but lacks proper function calling support' },
-        });
-      }, 1500);
-    });
-  }
-
-  // If files were written or it's a conversational response, we're done
-  if (writtenFiles.length > 0 || firstPass.finishReason === 'stop') {
-    return { response: firstPass, writtenFiles };
-  }
-
-  // If the agent used read/outline tools but didn't write, give it another chance
-  const usedReadOrOutline = hasToolCall(firstPass, 'read_document_file') || hasToolCall(firstPass, 'create_document_outline');
-  if (usedReadOrOutline) {
-    const retryRequest = {
-      ...baseRequest,
-      system: `${baseRequest.system}\n\nYou already gathered context. If the user requested document generation, complete it now by calling write_document_file with the final markdown output.`,
-    };
-
-    const secondPass = await generateText(retryRequest);
-    
-    // Emit second pass tool calls
-    if (onToolCall || onToolResult) {
-      const toolCalls = getToolCalls(secondPass);
-      toolCalls.forEach(tc => {
-        onToolCall?.({
-          toolCallId: tc.toolCallId,
-          toolName: tc.toolName,
-          args: tc.args,
-        });
-        onToolResult?.({
-          toolCallId: tc.toolCallId,
-          toolName: tc.toolName,
-          result: tc.result,
-        });
-      });
-      
-      // Also check for text-based tool calls
-      const textToolCalls = parseTextToolCalls(secondPass.text || '');
-      textToolCalls.forEach(tc => {
-        onToolCall?.(tc);
-        setTimeout(() => {
-          onToolResult?.({
-            toolCallId: tc.toolCallId,
-            toolName: tc.toolName,
-            result: { note: 'Model attempted tool call but lacks proper function calling support' },
-          });
-        }, 1500);
-      });
-    }
-
-    return { response: secondPass, writtenFiles };
-  }
-
-  // Otherwise, return the conversational response
-  return { response: firstPass, writtenFiles };
-}
-
 export async function generateDocumentResponse({
   provider,
   apiKey,
@@ -331,37 +462,20 @@ export async function generateDocumentResponse({
     throw new Error('Missing file writer. Select an output folder before generation.');
   }
 
-  const conversation = normalizeMessages(messages);
-  const resolvedModel = getProviderModel({ provider, apiKey, model });
-  const { response, writtenFiles } = await generateWithAdaptiveTooling({
-    resolvedModel,
+  const conversation = prepareConversation(messages);
+  const agentClient = createAgentClient({
+    provider,
+    apiKey,
+    model,
     activeDocument,
     outputFolder,
-    conversation,
     readFile,
     writeFile,
     onToolCall,
     onToolResult,
   });
 
-  // Return the response text and any files that were written
-  const responseText = String(response.text || '').trim();
-  
-  // Filter out raw tool call text that some models output incorrectly
-  const cleanedText = responseText
-    .replace(/TOOL_CALL>\[.*?\]>/g, '')
-    .replace(/<TOOL_CALL>.*?<\/TOOL_CALL>/g, '')
-    .replace(/\[TOOL_CALL\].*?\[\/TOOL_CALL\]/g, '')
-    .trim();
-  
-  const summary = writtenFiles.length > 0 
-    ? (cleanedText || `Wrote ${writtenFiles.length} file(s).`)
-    : cleanedText;
-
-  return {
-    text: summary,
-    writtenFiles,
-  };
+  return agentClient.generate(conversation);
 }
 
 export async function streamDocumentResponse({
@@ -384,58 +498,19 @@ export async function streamDocumentResponse({
     throw new Error('Missing file writer. Select an output folder before generation.');
   }
 
-  const conversation = normalizeMessages(messages);
-  const resolvedModel = getProviderModel({ provider, apiKey, model });
-  const writtenFiles = [];
-  const tools = buildTools({
+  const conversation = prepareConversation(messages);
+  const agentClient = createAgentClient({
+    provider,
+    apiKey,
+    model,
     activeDocument,
     readFile,
     writeFile,
-    writtenFiles,
+    onToolCall,
+    onToolResult,
+    onTextDelta,
+    onFinish,
   });
 
-  const result = await streamText({
-    model: resolvedModel,
-    system: `${SYSTEM_PROMPT}\n\n${documentContext(activeDocument)}`,
-    messages: conversation,
-    tools,
-    maxSteps: 5,
-    onChunk: ({ chunk }) => {
-      if (chunk.type === 'tool-call') {
-        onToolCall?.({
-          toolCallId: chunk.toolCallId,
-          toolName: chunk.toolName,
-          args: chunk.args,
-        });
-      } else if (chunk.type === 'tool-result') {
-        onToolResult?.({
-          toolCallId: chunk.toolCallId,
-          toolName: chunk.toolName,
-          result: chunk.result,
-        });
-      } else if (chunk.type === 'text-delta') {
-        onTextDelta?.(chunk.textDelta);
-      }
-    },
-  });
-
-  let fullText = '';
-  for await (const textPart of result.textStream) {
-    fullText += textPart;
-  }
-
-  const responseText = fullText.trim();
-  const summary = writtenFiles.length > 0 
-    ? (responseText || `Wrote ${writtenFiles.length} file(s).`)
-    : responseText;
-
-  onFinish?.({
-    text: summary,
-    writtenFiles,
-  });
-
-  return {
-    text: summary,
-    writtenFiles,
-  };
+  return agentClient.stream(conversation);
 }

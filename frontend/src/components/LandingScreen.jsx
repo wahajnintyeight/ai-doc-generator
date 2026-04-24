@@ -25,10 +25,10 @@ function GeneratingOverlay() {
               repeat: Infinity,
               ease: "linear",
             }}
-            className="h-16 w-16 rounded-full border-2 border-cyan-500/20 border-t-cyan-500"
+            className="h-16 w-16 rounded-full border-2 border-primary/20 border-t-primary"
           />
           <div className="absolute inset-0 flex items-center justify-center">
-            <Bot className="h-8 w-8 text-cyan-400" />
+            <Bot className="h-8 w-8 text-primary" />
           </div>
           <motion.div
             className="absolute -right-1 -top-1"
@@ -42,7 +42,7 @@ function GeneratingOverlay() {
               ease: "easeInOut",
             }}
           >
-            <Sparkles className="h-5 w-5 text-cyan-300" />
+            <Sparkles className="h-5 w-5 text-primary" />
           </motion.div>
         </div>
         <div className="text-center">
@@ -55,7 +55,7 @@ function GeneratingOverlay() {
               repeat: Infinity,
               ease: "easeInOut",
             }}
-            className="text-lg font-medium text-cyan-300"
+            className="text-lg font-medium text-primary"
           >
             Generating your document...
           </motion.p>
@@ -77,9 +77,9 @@ export function LandingScreen({
   onModelChange,
 }) {
   return (
-    <div className="relative flex h-screen w-full flex-col items-center justify-center overflow-hidden bg-[#07090d] px-6 py-16 text-slate-100 selection:bg-cyan-900/30">
+    <div className="relative flex h-screen w-full flex-col items-center justify-center overflow-hidden bg-[#07090d] px-6 py-16 text-slate-100 selection:bg-primary/30">
       {/* Background Ambient Glow */}
-      <div className="pointer-events-none absolute left-1/2 top-0 h-[400px] w-[800px] -translate-x-1/2 rounded-full bg-cyan-900/20 blur-[120px]"></div>
+      <div className="pointer-events-none absolute left-1/2 top-0 h-[400px] w-[800px] -translate-x-1/2 rounded-full bg-primary/20 blur-[120px]"></div>
 
       {/* Generating Overlay */}
       {isGenerating && <GeneratingOverlay />}
@@ -98,9 +98,9 @@ export function LandingScreen({
             initial={{ scale: 0.8, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             transition={{ delay: 0.2 }}
-            className="mb-8 flex h-20 w-20 items-center justify-center rounded-3xl border border-cyan-500/20 bg-cyan-500/10 shadow-[0_0_50px_rgba(34,211,238,0.15)]"
+            className="mb-8 flex h-20 w-20 items-center justify-center rounded-3xl border border-primary/20 bg-primary/10 shadow-[0_0_50px_rgba(6,182,212,0.15)]"
           >
-            <Bot className="h-10 w-10 text-cyan-400" strokeWidth={1.5} />
+            <Bot className="h-10 w-10 text-primary" strokeWidth={1.5} />
           </motion.div>
           <h1 className="mb-6 bg-gradient-to-br from-white to-slate-400 bg-clip-text text-6xl font-extrabold leading-[1.1] tracking-tight text-transparent sm:text-7xl">
             What do you want <br /> to build today?

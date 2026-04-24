@@ -157,7 +157,7 @@ export function SearchableModelDropdown({
           exit={{ opacity: 0, scale: 0.95, y: -6 }}
           transition={{ duration: 0.15, ease: 'easeOut' }}
           style={dropdownStyle}
-          className="rounded-2xl border border-purple-500/20 bg-gradient-to-b from-[#2a1f4a] to-[#1a1530] shadow-[0_8px_32px_rgba(139,92,246,0.3)] backdrop-blur-xl"
+          className="rounded-2xl border border-primary/20 bg-primary/10 shadow-[0_8px_32px_rgba(6,182,212,0.18)] backdrop-blur-xl"
         >
           {/* Search header */}
           <div className="border-b border-white/10 bg-white/5 p-3">
@@ -169,7 +169,7 @@ export function SearchableModelDropdown({
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search models"
-                className="w-full rounded-lg border border-white/10 bg-[#1a1530] py-2 pl-10 pr-10 text-sm text-slate-200 placeholder:text-slate-500 outline-none transition-colors focus:border-purple-500/50 focus:bg-[#221a3a]"
+                className="w-full rounded-lg border border-white/10 bg-primary/10 py-2 pl-10 pr-10 text-sm text-slate-200 placeholder:text-slate-500 outline-none transition-colors focus:border-primary/50 focus:bg-primary/10"
               />
               <Settings className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
             </div>
@@ -191,7 +191,7 @@ export function SearchableModelDropdown({
               <div className="p-4 text-center text-sm text-slate-400">
                 {searchQuery ? 'No models found' : 'No models available'}
                 {allowCustom && searchQuery && (
-                  <div className="mt-2 text-xs text-purple-400">
+                  <div className="mt-2 text-xs text-primary/80">
                     Press Enter to use "{searchQuery}"
                   </div>
                 )}
@@ -226,7 +226,7 @@ export function SearchableModelDropdown({
                           onClick={() => handleSelect(modelId)}
                           className={`group relative w-full rounded-lg px-3 py-2.5 text-left transition-all ${
                             isSelected
-                              ? 'bg-purple-500/20 text-purple-100'
+                              ? 'bg-primary/10 text-primary'
                               : 'text-slate-300 hover:bg-white/5'
                           }`}
                         >
@@ -234,7 +234,7 @@ export function SearchableModelDropdown({
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center gap-2 flex-wrap">
                                 {isSelected && (
-                                  <Check className="h-4 w-4 flex-shrink-0 text-purple-400" />
+                                  <Check className="h-4 w-4 flex-shrink-0 text-primary" />
                                 )}
                                 <span className="text-sm font-medium break-words">{modelName}</span>
                                 {isFree && (
@@ -287,7 +287,7 @@ export function SearchableModelDropdown({
                       onClick={() => handleSelect(modelId)}
                       className={`group relative w-full rounded-lg px-3 py-2.5 text-left transition-all ${
                         isSelected
-                          ? 'bg-purple-500/20 text-purple-100'
+                          ? 'bg-primary/10 text-primary'
                           : 'text-slate-300 hover:bg-white/5'
                       }`}
                     >
@@ -295,7 +295,7 @@ export function SearchableModelDropdown({
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2 flex-wrap">
                             {isSelected && (
-                              <Check className="h-4 w-4 flex-shrink-0 text-purple-400" />
+                                <Check className="h-4 w-4 flex-shrink-0 text-primary" />
                             )}
                             <span className="text-sm font-medium break-words">{modelName}</span>
                             {isFree && (
@@ -362,14 +362,14 @@ export function SearchableModelDropdown({
           }}
           readOnly={!allowCustom}
           placeholder={placeholder}
-          className={`w-full rounded-xl border border-white/5 bg-[#121b27] px-4 py-2 text-sm font-medium text-slate-200 outline-none ring-1 ring-inset ring-white/5 transition-all focus:border-purple-500/50 focus:ring-purple-500/20 hover:bg-[#16212e] ${
+          className={`w-full rounded-xl border border-white/5 bg-[#121b27] px-4 py-2 text-sm font-medium text-slate-200 outline-none ring-1 ring-inset ring-white/5 transition-all focus:border-primary/50 focus:ring-primary/20 hover:bg-[#16212e] ${
             allowCustom ? '' : 'cursor-pointer'
           } ${className}`}
         />
         <button
           type="button"
           onClick={toggleDropdown}
-          className="absolute right-3 top-1/2 -translate-y-1/2 text-cyan-500/40 transition-colors hover:text-cyan-400"
+          className="absolute right-3 top-1/2 -translate-y-1/2 text-primary/40 transition-colors hover:text-primary"
         >
           {isLoading ? (
             <Loader2 className="h-4 w-4 animate-spin" />

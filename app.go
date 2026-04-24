@@ -142,9 +142,19 @@ func (a *App) ReadGeneratedFile(outputFolder string, relativePath string) (strin
 
 // ListGeneratedFiles lists files in a directory under the selected output folder.
 func (a *App) ListGeneratedFiles(outputFolder string, relativePath string) (string, error) {
-	fullPath, err := resolveSandboxPath(outputFolder, relativePath)
-	if err != nil {
-		return "", err
+	cleanRelative := strings.TrimSpace(relativePath)
+	cleanBase := filepath.Clean(strings.TrimSpace(outputFolder))
+	if cleanBase == "" {
+		return "", fmt.Errorf("base folder is required")
+	}
+
+	fullPath := cleanBase
+	if cleanRelative != "" && cleanRelative != "." {
+		resolvedPath, err := resolveSandboxPath(outputFolder, relativePath)
+		if err != nil {
+			return "", err
+		}
+		fullPath = resolvedPath
 	}
 
 	entries, err := os.ReadDir(fullPath)
@@ -162,8 +172,8 @@ func (a *App) ListGeneratedFiles(outputFolder string, relativePath string) (stri
 	result := make([]generatedFileEntry, 0, len(entries))
 	for _, entry := range entries {
 		name := entry.Name()
-		displayPath := filepath.ToSlash(filepath.Join(strings.TrimSpace(relativePath), name))
-		if strings.TrimSpace(relativePath) == "" {
+		displayPath := filepath.ToSlash(filepath.Join(cleanRelative, name))
+		if cleanRelative == "" || cleanRelative == "." {
 			displayPath = filepath.ToSlash(name)
 		}
 		result = append(result, generatedFileEntry{

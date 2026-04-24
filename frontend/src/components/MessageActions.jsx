@@ -32,7 +32,7 @@ export function MessageActions({
       {/* Copy Button */}
       <button
         onClick={handleCopy}
-        className="group inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-slate-300 transition-all hover:border-cyan-500/30 hover:bg-cyan-500/10 hover:text-cyan-200"
+        className="group inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-slate-300 transition-all hover:border-primary/30 hover:bg-primary/10 hover:text-primary"
         title={copied ? 'Copied!' : 'Copy message'}
       >
         <AnimatePresence mode="wait">
@@ -65,7 +65,7 @@ export function MessageActions({
       {canRegenerate && onRegenerate && (
         <button
           onClick={onRegenerate}
-          className="group inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-slate-300 transition-all hover:border-cyan-500/30 hover:bg-cyan-500/10 hover:text-cyan-200"
+          className="group inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs font-medium text-slate-300 transition-all hover:border-primary/30 hover:bg-primary/10 hover:text-primary"
           title="Regenerate response"
         >
           <RotateCcw className="h-3.5 w-3.5" />
