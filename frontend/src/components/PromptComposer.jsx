@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Loader2 } from 'lucide-react';
+import { Send, Loader2, SendHorizontal } from 'lucide-react';
 import { PromptComposerControls } from './PromptComposerControls';
 
 export function PromptComposer({
@@ -74,7 +74,7 @@ export function PromptComposer({
   return (
     <form onSubmit={handleSubmit} className="group relative flex w-full flex-col">
       <div className="absolute -inset-1 rounded-[2.5rem] bg-gradient-to-r from-primary/20 via-primary/20 to-primary/20 opacity-0 blur-2xl transition duration-500 group-focus-within:opacity-100"></div>
-      
+
       <div className="relative flex w-full flex-col rounded-[2rem] border border-white/10 bg-[#0c0e14]/60 p-2 shadow-2xl backdrop-blur-xl transition-all duration-300 group-focus-within:border-purple-500/30 group-focus-within:bg-[#0c0e14]/80 sm:p-4">
         {/* Subtle inner glow */}
         <div className="absolute inset-0 rounded-[2rem] bg-gradient-to-b from-white/[0.02] to-transparent pointer-events-none"></div>
@@ -101,20 +101,21 @@ export function PromptComposer({
               onToolSelect={handleToolSelect}
             />
           </div>
-          
+
           <button
             type="submit"
             disabled={disabled || !prompt.trim()}
-            className="group/btn relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-tr from-primary to-primary/80 text-white shadow-lg transition-all hover:scale-110 hover:shadow-primary/40 active:scale-90 disabled:scale-100 disabled:opacity-30 disabled:grayscale sm:h-14 sm:w-14"
+            className="group/btn relative flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-tr from-primary to-primary/80 text-white shadow-lg transition-all hover:scale-110 hover:shadow-primary/40 active:scale-90 disabled:scale-100 disabled:opacity-30 disabled:grayscale sm:h-10 sm:w-10"
             aria-label={submitLabel || 'Send Message'}
           >
             <div className="absolute inset-0 bg-gradient-to-tr from-primary to-primary/80 opacity-0 transition-opacity group-hover/btn:opacity-100"></div>
-            
+
             <div className="relative flex items-center justify-center">
               {disabled ? (
                 <Loader2 className="h-6 w-6 animate-spin" />
               ) : (
-                <Send className="h-6 w-6 transition-all duration-300 group-hover/btn:translate-x-1 group-hover/btn:-translate-y-1 group-active:scale-125" />
+                <SendHorizontal
+                  className="h-6 w-6 transition-all duration-300 group-active:scale-125" />
               )}
             </div>
           </button>

@@ -16,7 +16,7 @@ function MessageBubble({ message, onRegenerate, canRegenerate }) {
   const isError = message.role === 'error';
   const isAssistant = message.role === 'assistant';
 
-  console.log('[MESSAGE]:', message);
+  // console.log('[MESSAGE]:', message);
   return (
     <motion.div
       initial={{ opacity: 0, x: isUser ? 20 : -20 }}
@@ -202,6 +202,7 @@ export function AgentPane({
           onProviderChange={onProviderChange}
           onModelChange={onModelChange}
           placeholder="Type a prompt for the document agent..."
+          history={messages}
         />
       </div>
     </motion.div>

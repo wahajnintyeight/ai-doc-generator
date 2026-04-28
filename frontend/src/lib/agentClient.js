@@ -241,85 +241,97 @@ function createAgentClient({
   }
 
   async function generate(messages) {
-    const firstPass = await generateText(createBaseRequest(messages));
+    try {
+      const firstPass = await generateText(createBaseRequest(messages));
+      console.log('[firstpass]',firstPass)
+      toolEvents.emitToolCalls(firstPass);
 
-    toolEvents.emitToolCalls(firstPass);
+      const shouldRetry = !writtenFiles.length
+        && firstPass.finishReason !== 'stop'
+        && (hasToolCall(firstPass, 'read_document_file') || hasToolCall(firstPass, 'create_document_outline'));
 
-    const shouldRetry = !writtenFiles.length
-      && firstPass.finishReason !== 'stop'
-      && (hasToolCall(firstPass, 'read_document_file') || hasToolCall(firstPass, 'create_document_outline'));
+      const response = shouldRetry
+        ? await generateText({
+          ...createBaseRequest(messages),
+          system: `${buildSystemPrompt(activeDocument, outputFolder)}\n\nYou already gathered context. If the user requested document generation, complete it now by calling write_document_file with the final markdown output.`,
+        })
+        : firstPass;
 
-    const response = shouldRetry
-      ? await generateText({
-        ...createBaseRequest(messages),
-        system: `${buildSystemPrompt(activeDocument, outputFolder)}\n\nYou already gathered context. If the user requested document generation, complete it now by calling write_document_file with the final markdown output.`,
-      })
-      : firstPass;
+      console.log("[RES]", response)
 
-    if (response !== firstPass) {
-      toolEvents.emitToolCalls(response);
+      if (response !== firstPass) {
+        toolEvents.emitToolCalls(response);
+      }
+
+      const responseText = String(response.text || '').trim();
+      const cleanedText = buildLocalResponseText({
+        responseText,
+        writtenFiles,
+        executedToolCalls: getToolCalls(response),
+      });
+
+      return {
+        text: cleanedText,
+        writtenFiles,
+      };
+    } catch (error) {
+      const errorMessage = extractErrorMessage(error);
+      throw new Error(errorMessage);
     }
-
-    const responseText = String(response.text || '').trim();
-    const cleanedText = buildLocalResponseText({
-      responseText,
-      writtenFiles,
-      executedToolCalls: getToolCalls(response),
-    });
-
-    return {
-      text: cleanedText,
-      writtenFiles,
-    };
   }
 
   async function stream(messages) {
-    const result = await streamText({
-      model: resolvedModel,
-      system: buildSystemPrompt(activeDocument, outputFolder),
-      messages,
-      tools,
-      maxSteps: 5,
-      onChunk: ({ chunk }) => {
-        if (chunk.type === 'tool-call') {
-          onToolCall?.({
-            toolCallId: chunk.toolCallId,
-            toolName: chunk.toolName,
-            args: chunk.args,
-          });
-        } else if (chunk.type === 'tool-result') {
-          onToolResult?.({
-            toolCallId: chunk.toolCallId,
-            toolName: chunk.toolName,
-            result: chunk.result,
-          });
-        } else if (chunk.type === 'text-delta') {
-          onTextDelta?.(chunk.textDelta);
-        }
-      },
-    });
+    try {
+      const result = await streamText({
+        model: resolvedModel,
+        system: buildSystemPrompt(activeDocument, outputFolder),
+        messages,
+        tools,
+        maxSteps: 5,
+        onChunk: ({ chunk }) => {
+          if (chunk.type === 'tool-call') {
+            onToolCall?.({
+              toolCallId: chunk.toolCallId,
+              toolName: chunk.toolName,
+              args: chunk.args,
+            });
+          } else if (chunk.type === 'tool-result') {
+            onToolResult?.({
+              toolCallId: chunk.toolCallId,
+              toolName: chunk.toolName,
+              result: chunk.result,
+            });
+          } else if (chunk.type === 'text-delta') {
+            onTextDelta?.(chunk.textDelta);
+          }
+        },
+      });
 
-    let fullText = '';
-    for await (const textPart of result.textStream) {
-      fullText += textPart;
+      let fullText = '';
+      for await (const textPart of result.textStream) {
+        fullText += textPart;
+      }
+
+      const responseText = fullText.trim();
+      const summary = buildLocalResponseText({
+        responseText,
+        writtenFiles,
+        executedToolCalls: getToolCalls(result),
+      });
+
+      onFinish?.({
+        text: summary,
+        writtenFiles,
+      });
+
+      return {
+        text: summary,
+        writtenFiles,
+      };
+    } catch (error) {
+      const errorMessage = extractErrorMessage(error);
+      throw new Error(errorMessage);
     }
-
-    const responseText = fullText.trim();
-    const summary = buildLocalResponseText({
-      responseText,
-      writtenFiles,
-      executedToolCalls: getToolCalls(result),
-    });
-
-    onFinish?.({
-      text: summary,
-      writtenFiles,
-    });
-
-    return {
-      text: summary,
-      writtenFiles,
-    };
   }
 
   return {
@@ -366,6 +378,30 @@ function parseTextToolCalls(text) {
   }
 
   return toolCalls;
+}
+
+function extractErrorMessage(error) {
+  // Check if error has metadata.raw field (OpenRouter specific)
+  if (error?.metadata?.raw) {
+    return error.metadata.raw;
+  }
+
+  // Check if error.error has metadata.raw
+  if (error?.error?.metadata?.raw) {
+    return error.error.metadata.raw;
+  }
+
+  // Fallback to standard error message
+  if (error?.message) {
+    return error.message;
+  }
+
+  if (error?.error?.message) {
+    return error.error.message;
+  }
+
+  // Last resort
+  return String(error);
 }
 
 export async function generateDocumentResponse({
